@@ -1,0 +1,35 @@
+{
+	"schemaVersion": 1,
+	"id": "nhack",
+	"version": "${version}",
+	"name": "nhack",
+	"description": "Client-side Fabric 1.21.11 template: modules, events, settings, commands, config and ClickGUI.",
+	"authors": [
+		"nhack"
+	],
+	"contact": {},
+	"license": "MIT",
+	"icon": "assets/nhack/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"main": [
+			"dev.nhack.NHack"
+		],
+		"client": [
+			"dev.nhack.client.NHackClient"
+		]
+	},
+	"mixins": [
+		"nhack.mixins.json",
+		{
+			"config": "nhack.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
