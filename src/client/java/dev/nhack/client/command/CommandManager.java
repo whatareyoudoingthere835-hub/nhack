@@ -1,6 +1,7 @@
 package dev.nhack.client.command;
 
 import dev.nhack.client.command.commands.BindCommand;
+import dev.nhack.client.command.commands.FriendCommand;
 import dev.nhack.client.command.commands.HelpCommand;
 import dev.nhack.client.command.commands.PrefixCommand;
 import dev.nhack.client.command.commands.ToggleCommand;
@@ -23,6 +24,7 @@ public final class CommandManager {
 		register(new ToggleCommand());
 		register(new BindCommand());
 		register(new PrefixCommand());
+		register(new FriendCommand());
 	}
 
 	private static void register(Command command) {

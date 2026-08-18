@@ -44,10 +44,13 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 
 ```
 .help
-.toggle Sprint
+.toggle Aura
 .bind Fullbright G
+.friend add Steve
 .prefix ,
 ```
+
+**Aura** (Combat): range, walls, FOV, Track/Interact/None rotations, auto-weapon, smart crit, shield-breaker, target filters. `.friend` исключает игроков.
 
 Конфиг пишется в `.minecraft/config/nhack/client.json`.
 

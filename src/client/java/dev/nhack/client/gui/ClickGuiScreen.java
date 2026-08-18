@@ -38,7 +38,7 @@ public final class ClickGuiScreen extends Screen {
 	private int dragOffX;
 	private int dragOffY;
 
-	private Category selected = Category.MOVEMENT;
+	private Category selected = Category.COMBAT;
 	private Module focused;
 	private Module binding;
 	private NumberSetting sliding;
