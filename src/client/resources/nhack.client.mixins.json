@@ -6,7 +6,10 @@
 		"MinecraftMixin",
 		"LightTextureMixin",
 		"LocalPlayerMixin",
-		"ClientPacketListenerMixin"
+		"ClientPacketListenerMixin",
+		"ConnectionMixin",
+		"DeltaTrackerTimerMixin",
+		"EntityMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

@@ -6,7 +6,9 @@ import dev.nhack.client.module.Category;
 import dev.nhack.client.module.Module;
 import dev.nhack.client.module.ModuleManager;
 import dev.nhack.client.module.modules.client.ClickGuiModule;
+import dev.nhack.client.setting.BindSetting;
 import dev.nhack.client.setting.BoolSetting;
+import dev.nhack.client.setting.ColorSetting;
 import dev.nhack.client.setting.ModeSetting;
 import dev.nhack.client.setting.NumberSetting;
 import dev.nhack.client.setting.Setting;
@@ -41,6 +43,7 @@ public final class ClickGuiScreen extends Screen {
 	private Category selected = Category.COMBAT;
 	private Module focused;
 	private Module binding;
+	private BindSetting bindingSetting;
 	private NumberSetting sliding;
 
 	private int moduleScroll;
@@ -171,6 +174,11 @@ public final class ClickGuiScreen extends Screen {
 				cursor = drawSettingRow(graphics, font, mouseX, mouseY, sx, sw, cursor, setting.getName(), bool.get() ? "ON" : "OFF", bool.get());
 			} else if (setting instanceof ModeSetting mode) {
 				cursor = drawSettingRow(graphics, font, mouseX, mouseY, sx, sw, cursor, setting.getName(), mode.get(), false);
+			} else if (setting instanceof BindSetting bind) {
+				String value = bindingSetting == bind ? "..." : KeyUtil.name(bind.get());
+				cursor = drawSettingRow(graphics, font, mouseX, mouseY, sx, sw, cursor, setting.getName(), value, bindingSetting == bind);
+			} else if (setting instanceof ColorSetting color) {
+				cursor = drawSettingRow(graphics, font, mouseX, mouseY, sx, sw, cursor, setting.getName(), color.hex(), true);
 			} else if (setting instanceof NumberSetting number) {
 				boolean hover = hovered(mouseX, mouseY, sx + 10, cursor, sw - 20, 34);
 				graphics.fill(sx + 10, cursor, sx + sw - 10, cursor + 34, hover ? ColorUtil.ROW_HOVER : ColorUtil.ROW);
@@ -351,6 +359,15 @@ public final class ClickGuiScreen extends Screen {
 					mode.cycle(1);
 					return true;
 				}
+				if (setting instanceof BindSetting bind) {
+					bindingSetting = bind;
+					binding = null;
+					return true;
+				}
+				if (setting instanceof ColorSetting color) {
+					color.cycle();
+					return true;
+				}
 			}
 			cursor += ROW + 4;
 		}
@@ -412,6 +429,16 @@ public final class ClickGuiScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(KeyEvent input) {
+		if (bindingSetting != null) {
+			int key = input.key();
+			if (key == GLFW.GLFW_KEY_ESCAPE || key == GLFW.GLFW_KEY_DELETE || key == GLFW.GLFW_KEY_BACKSPACE) {
+				bindingSetting.set(GLFW.GLFW_KEY_UNKNOWN);
+			} else {
+				bindingSetting.set(key);
+			}
+			bindingSetting = null;
+			return true;
+		}
 		if (binding != null) {
 			int key = input.key();
 			if (key == GLFW.GLFW_KEY_ESCAPE || key == GLFW.GLFW_KEY_DELETE || key == GLFW.GLFW_KEY_BACKSPACE) {

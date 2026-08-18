@@ -52,6 +52,12 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 
 **Aura** (Combat): range, walls, FOV, Track/Interact/None rotations, auto-weapon, smart crit, shield-breaker, target filters. `.friend` исключает игроков.
 
+**Timer** (Movement): Normal / Matrix / Shift / Grim, OnFlag, auto-disable.
+
+**NoSlow** (Movement): NCP, StrictNCP, Matrix, Grim, GrimNew, MusteryGrief, LFCraft, Matrix2/3 + food/shield/blocks.
+
+**ESP** (Render): 2D-боксы, HP, TNT, перлы, burrow, маяки, lingering clouds.
+
 Конфиг пишется в `.minecraft/config/nhack/client.json`.
 
 ## Как добавить модуль

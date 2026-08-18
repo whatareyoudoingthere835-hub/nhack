@@ -578,7 +578,7 @@ public final class AuraModule extends Module {
 			if (!hostiles.get()) {
 				return true;
 			}
-			if (onlyAngry.get() && entity instanceof NeutralMob neutral && !neutral.isAngryAt(player)) {
+			if (onlyAngry.get() && entity instanceof NeutralMob neutral && !neutral.isAngry()) {
 				return true;
 			}
 		}
