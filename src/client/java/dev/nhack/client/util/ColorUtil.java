@@ -3,14 +3,22 @@ package dev.nhack.client.util;
 public final class ColorUtil {
 	public static final int ACCENT = 0xFFC81E3A;
 	public static final int ACCENT_HOVER = 0xFFE03A54;
-	public static final int PANEL = 0xE0141418;
-	public static final int PANEL_HEADER = 0xF00C0C10;
-	public static final int MODULE = 0xD018181C;
-	public static final int MODULE_HOVER = 0xD024242A;
-	public static final int TEXT = 0xFFEDEDED;
-	public static final int TEXT_DIM = 0xFF9A9AA3;
-	public static final int ENABLED = 0xFFF2F2F2;
-	public static final int OUTLINE = 0xFF2A2A32;
+	public static final int ACCENT_SOFT = 0x55C81E3A;
+	public static final int GLASS = 0x99101014;
+	public static final int GLASS_DARK = 0xBB0B0B10;
+	public static final int GLASS_HEADER = 0xCC0A0A0E;
+	public static final int ROW = 0x33000000;
+	public static final int ROW_HOVER = 0x44FFFFFF;
+	public static final int ROW_ACTIVE = 0x33C81E3A;
+	public static final int STROKE = 0x55FFFFFF;
+	public static final int TEXT = 0xFFF2F2F4;
+	public static final int TEXT_DIM = 0xB3A8A8B3;
+	public static final int ENABLED = 0xFFFFFFFF;
+	public static final int PANEL = 0x99101014;
+	public static final int PANEL_HEADER = 0xCC0A0A0E;
+	public static final int MODULE = 0x33000000;
+	public static final int MODULE_HOVER = 0x44FFFFFF;
+	public static final int OUTLINE = 0x55FFFFFF;
 
 	private ColorUtil() {
 	}
