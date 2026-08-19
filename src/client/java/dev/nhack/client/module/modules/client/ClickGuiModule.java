@@ -1,6 +1,7 @@
 package dev.nhack.client.module.modules.client;
 
 import dev.nhack.client.gui.ClickGuiScreen;
+import dev.nhack.client.gui.menu.NHackMainMenuScreen;
 import dev.nhack.client.module.Category;
 import dev.nhack.client.module.Module;
 import net.minecraft.client.Minecraft;
@@ -25,7 +26,7 @@ public final class ClickGuiModule extends Module {
 	protected void onDisable() {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.screen instanceof ClickGuiScreen) {
-			mc.setScreen(null);
+			mc.setScreen(mc.level == null ? NHackMainMenuScreen.getInstance() : null);
 		}
 	}
 }

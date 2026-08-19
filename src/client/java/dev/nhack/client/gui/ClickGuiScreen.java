@@ -466,6 +466,10 @@ public final class ClickGuiScreen extends Screen {
 	public void onClose() {
 		ModuleManager.get(ClickGuiModule.class).ifPresent(module -> module.setEnabled(false, false));
 		ConfigManager.save();
+		if (this.minecraft != null && this.minecraft.level == null) {
+			this.minecraft.setScreen(dev.nhack.client.gui.menu.NHackMainMenuScreen.getInstance());
+			return;
+		}
 		super.onClose();
 	}
 
