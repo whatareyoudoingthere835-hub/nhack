@@ -6,6 +6,7 @@
 		"MinecraftMixin",
 		"LightTextureMixin",
 		"LocalPlayerMixin",
+		"ClientInputAccessor",
 		"ClientPacketListenerMixin",
 		"ConnectionMixin",
 		"DeltaTrackerTimerMixin",
