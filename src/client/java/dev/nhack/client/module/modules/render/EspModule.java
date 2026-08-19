@@ -206,6 +206,7 @@ public final class EspModule extends Module {
 	}
 
 	private float[] projectBox(Entity entity, float pt) {
+		Minecraft mc = Minecraft.getInstance();
 		Vec3 pos = WorldToScreen.lerp(entity, pt);
 		AABB bb = entity.getBoundingBox();
 		AABB shifted = new AABB(
@@ -219,19 +220,28 @@ public final class EspModule extends Module {
 
 		float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE;
 		float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
-		boolean any = false;
 		for (Vec3 corner : corners(shifted)) {
 			float[] screen = WorldToScreen.project(corner);
 			if (screen == null) {
-				continue;
+				return null;
 			}
-			any = true;
 			minX = Math.min(minX, screen[0]);
 			minY = Math.min(minY, screen[1]);
 			maxX = Math.max(maxX, screen[0]);
 			maxY = Math.max(maxY, screen[1]);
 		}
-		return any ? new float[]{minX, minY, maxX, maxY} : null;
+
+		float width = maxX - minX;
+		float height = maxY - minY;
+		int screenW = mc.getWindow().getGuiScaledWidth();
+		int screenH = mc.getWindow().getGuiScaledHeight();
+		if (width < 1.0F || height < 1.0F || width > screenW * 1.5F || height > screenH * 1.5F) {
+			return null;
+		}
+		if (maxX < 0 || maxY < 0 || minX > screenW || minY > screenH) {
+			return null;
+		}
+		return new float[]{minX, minY, maxX, maxY};
 	}
 
 	private static Vec3[] corners(AABB box) {
