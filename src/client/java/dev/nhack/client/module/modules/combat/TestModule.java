@@ -88,6 +88,9 @@ public final class TestModule extends Module {
 	private float rotationYaw;
 	private float rotationPitch;
 	private int curveIndex;
+	private int playIndex;
+	private float[] cumYaw;
+	private float[] cumPitch;
 	private int hitTicks;
 	private boolean readyForAttack;
 
@@ -102,6 +105,9 @@ public final class TestModule extends Module {
 		recording = false;
 		prevRecordDown = false;
 		curveIndex = 0;
+		playIndex = 0;
+		cumYaw = null;
+		cumPitch = null;
 		hitTicks = 0;
 		readyForAttack = false;
 		if (mc.player != null) {
@@ -152,6 +158,11 @@ public final class TestModule extends Module {
 		hitTicks = Math.max(0, hitTicks - 1);
 
 		if (hitTicks > 0) {
+			return;
+		}
+		// Only attack once the crosshair is actually aimed at the target's hitbox.
+		if (!isAimedAt(player)) {
+			readyForAttack = false;
 			return;
 		}
 		// On a miss we simply do not attack this window.
@@ -226,6 +237,9 @@ public final class TestModule extends Module {
 		if (recording) {
 			recording = false;
 			removeFake(mc);
+			buildCurve();
+			playIndex = 0;
+			curveIndex = 0;
 			ChatUtil.info("Recording stopped — saved " + record.size() + " frames");
 			return;
 		}
@@ -233,6 +247,9 @@ public final class TestModule extends Module {
 			return;
 		}
 		record.clear();
+		cumYaw = null;
+		cumPitch = null;
+		playIndex = 0;
 		curveIndex = 0;
 		lastYaw = player.getYRot();
 		lastPitch = player.getXRot();
@@ -274,21 +291,50 @@ public final class TestModule extends Module {
 		}
 	}
 
+	// Pre-compute the cumulative rotation of the recording so the curve can be
+	// scaled to whatever angle the real target needs while keeping its shape.
+	private void buildCurve() {
+		int n = record.size();
+		cumYaw = new float[n];
+		cumPitch = new float[n];
+		float sumYaw = 0.0F;
+		float sumPitch = 0.0F;
+		for (int i = 0; i < n; i++) {
+			float[] frame = record.get(i);
+			sumYaw += frame[0];
+			sumPitch += frame[1];
+			cumYaw[i] = sumYaw;
+			cumPitch[i] = sumPitch;
+		}
+	}
+
 	// ------------------------------------------------------------------ combat
 
 	private void updateTarget(Minecraft mc, LocalPlayer player) {
 		LivingEntity candidate = findTarget(mc, player);
 		if (target == null) {
-			target = candidate;
+			setTarget(player, candidate);
 			return;
 		}
 		float r = range.getFloat();
 		boolean invalid = target.isRemoved() || target.isDeadOrDying() || !target.isAlive()
 			|| player.distanceToSqr(target) > (r + 0.5) * (r + 0.5);
 		if (invalid) {
-			target = candidate;
+			setTarget(player, candidate);
 		} else if (candidate != null && player.distanceToSqr(candidate) < player.distanceToSqr(target) - 1.0) {
-			target = candidate;
+			setTarget(player, candidate);
+		}
+	}
+
+	// Start tracking a new target: begin the recorded curve again from the player's
+	// current camera so the curved approach is visible on every engagement.
+	private void setTarget(LocalPlayer player, LivingEntity candidate) {
+		target = candidate;
+		playIndex = 0;
+		curveIndex = 0;
+		if (player != null) {
+			rotationYaw = player.getYRot();
+			rotationPitch = player.getXRot();
 		}
 	}
 
@@ -343,22 +389,10 @@ public final class TestModule extends Module {
 		float targetYaw = dest[0];
 		float targetPitch = dest[1];
 
-		if (rotationMode.is("Curved") && !record.isEmpty()) {
-			// Replay the recorded micro-motion at the same speed.
-			float[] frame = record.get(curveIndex % record.size());
-			curveIndex++;
-			rotationYaw += frame[0] * speed.getFloat();
-			rotationPitch += frame[1] * speed.getFloat();
-
-			// Gently pull back toward the live target so it never drifts off.
-			rotationYaw += Mth.wrapDegrees(targetYaw - rotationYaw) * 0.35F;
-			rotationPitch += (targetPitch - rotationPitch) * 0.35F;
+		if (rotationMode.is("Curved") && cumYaw != null && cumYaw.length > 0) {
+			curvedAim(targetYaw, targetPitch);
 		} else {
-			// Straight line at a fixed per-tick speed.
-			float stepYaw = Mth.clamp(Mth.wrapDegrees(targetYaw - rotationYaw), -rotationSpeed.getFloat(), rotationSpeed.getFloat());
-			float stepPitch = Mth.clamp(targetPitch - rotationPitch, -rotationSpeed.getFloat(), rotationSpeed.getFloat());
-			rotationYaw += stepYaw;
-			rotationPitch += stepPitch;
+			straightAim(targetYaw, targetPitch);
 		}
 
 		rotationYaw = Mth.wrapDegrees(rotationYaw);
@@ -369,6 +403,56 @@ public final class TestModule extends Module {
 			player.setYRot(rotationYaw);
 			player.setXRot(rotationPitch);
 		}
+	}
+
+	// Curved: play the recorded mouse motion once, scaled to the angle we actually
+	// need, so the crosshair follows the exact curve you recorded at the same speed.
+	private void curvedAim(float targetYaw, float targetPitch) {
+		float deltaYaw = Mth.wrapDegrees(targetYaw - rotationYaw);
+		float deltaPitch = targetPitch - rotationPitch;
+
+		if (playIndex < cumYaw.length) {
+			float prevYaw = playIndex > 0 ? cumYaw[playIndex - 1] : 0.0F;
+			float prevPitch = playIndex > 0 ? cumPitch[playIndex - 1] : 0.0F;
+			float totalYaw = cumYaw[cumYaw.length - 1];
+			float totalPitch = cumPitch[cumPitch.length - 1];
+
+			float stepYaw = (cumYaw[playIndex] - prevYaw) * speed.getFloat();
+			float stepPitch = (cumPitch[playIndex] - prevPitch) * speed.getFloat();
+			if (Math.abs(totalYaw) > 0.01F) {
+				stepYaw *= deltaYaw / totalYaw;
+			}
+			if (Math.abs(totalPitch) > 0.01F) {
+				stepPitch *= deltaPitch / totalPitch;
+			}
+			rotationYaw += stepYaw;
+			rotationPitch += stepPitch;
+			playIndex++;
+		} else {
+			// Path is done — hold on the target with tiny recorded micro-movements.
+			float[] frame = record.get(curveIndex % record.size());
+			curveIndex++;
+			rotationYaw += frame[0] * speed.getFloat() * 0.12F;
+			rotationPitch += frame[1] * speed.getFloat() * 0.12F;
+			rotationYaw += Mth.wrapDegrees(targetYaw - rotationYaw) * 0.4F;
+			rotationPitch += (targetPitch - rotationPitch) * 0.4F;
+		}
+	}
+
+	// Straight: fixed per-tick angular speed in a straight line.
+	private void straightAim(float targetYaw, float targetPitch) {
+		float stepYaw = Mth.clamp(Mth.wrapDegrees(targetYaw - rotationYaw), -rotationSpeed.getFloat(), rotationSpeed.getFloat());
+		float stepPitch = Mth.clamp(targetPitch - rotationPitch, -rotationSpeed.getFloat(), rotationSpeed.getFloat());
+		rotationYaw += stepYaw;
+		rotationPitch += stepPitch;
+	}
+
+	// Whether the current (spoofed) rotation ray lands on the target's hitbox.
+	private boolean isAimedAt(LocalPlayer player) {
+		if (target == null) {
+			return false;
+		}
+		return RotationUtil.checkRtx(player, target, rotationYaw, rotationPitch, range.getFloat(), range.getFloat(), false);
 	}
 
 	private void attack(Minecraft mc, LocalPlayer player) {
