@@ -7,7 +7,7 @@
 		"LightTextureMixin",
 		"LocalPlayerMixin",
 		"ClientInputAccessor",
-		"ClientPacketListenerMixin",
+		"ClientCommonPacketListenerImplMixin",
 		"ConnectionMixin",
 		"DeltaTrackerTimerMixin",
 		"EntityMixin"
