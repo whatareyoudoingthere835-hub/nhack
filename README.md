@@ -53,6 +53,8 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 
 **Aura** (Combat): range, walls, FOV, Track/Interact/None rotations, auto-weapon, smart crit, shield-breaker, target filters. `.friend` исключает игроков.
 
+**Test** (Combat) — обучаемая киллаура. Зажми **Record**-банд: появляется фейк-игрок, на которого ты наводишься, и модуль записывает твои микродвижения мыши. Потом он повторяет их на реальных целях с той же скоростью — поворот по кривой, а не по прямой. Настройки: `Range` (2.9–4 блока), `Rotation` (Curved — запись / Straight — прямая), `MissChance` (0–99%, при промахе просто не бьёт), `Silent` (только тело / тело+камера), `Speed`, `RotationSpeed`, `AttackDelay`, `Targets`.
+
 **Timer** (Movement): Normal / Matrix / Shift / Grim, OnFlag, auto-disable.
 
 **NoSlow** (Movement): NCP, StrictNCP, Matrix, Grim, GrimNew, MusteryGrief, LFCraft, Matrix2/3 + food/shield/blocks.

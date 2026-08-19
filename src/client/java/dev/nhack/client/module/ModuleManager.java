@@ -7,6 +7,7 @@ import dev.nhack.client.event.events.TickEvent;
 import dev.nhack.client.module.modules.client.ClickGuiModule;
 import dev.nhack.client.module.modules.client.HudModule;
 import dev.nhack.client.module.modules.combat.AuraModule;
+import dev.nhack.client.module.modules.combat.TestModule;
 import dev.nhack.client.module.modules.misc.ExampleModule;
 import dev.nhack.client.module.modules.movement.NoSlowModule;
 import dev.nhack.client.module.modules.movement.SprintModule;
@@ -35,6 +36,7 @@ public final class ModuleManager {
 		register(new ClickGuiModule());
 		register(new HudModule());
 		register(new AuraModule());
+		register(new TestModule());
 		register(new SprintModule());
 		register(new TimerModule());
 		register(new NoSlowModule());
