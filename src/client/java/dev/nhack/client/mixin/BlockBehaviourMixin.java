@@ -16,9 +16,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(BlockBehaviour.class)
 public class BlockBehaviourMixin {
-	@Inject(method = "getShadeBrightness", at = @At("HEAD"), cancellable = true)
+	@Inject(method = "getShadeBrightness", at = @At("HEAD"), cancellable = true, require = 0)
 	private void nhack$xrayShade(BlockState state, BlockGetter level, BlockPos pos, CallbackInfoReturnable<Float> cir) {
 		if (XrayModule.isActive()) {
+			XrayModule.hookFired("shade");
 			cir.setReturnValue(1.0F);
 		}
 	}

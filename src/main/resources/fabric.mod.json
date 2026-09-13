@@ -24,6 +24,10 @@
 		{
 			"config": "nhack.client.mixins.json",
 			"environment": "client"
+		},
+		{
+			"config": "nhack.sodium.mixins.json",
+			"environment": "client"
 		}
 	],
 	"depends": {

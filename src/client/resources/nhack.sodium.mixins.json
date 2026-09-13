@@ -1,0 +1,16 @@
+{
+	"required": false,
+	"package": "dev.nhack.client.mixin.sodium",
+	"compatibilityLevel": "JAVA_21",
+	"client": [
+		"SodiumBlockRendererMixin",
+		"SodiumBlockOcclusionMixin",
+		"SodiumFluidRendererMixin"
+	],
+	"injectors": {
+		"defaultRequire": 0
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}

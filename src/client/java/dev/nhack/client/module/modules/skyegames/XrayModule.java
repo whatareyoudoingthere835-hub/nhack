@@ -4,64 +4,67 @@ import dev.nhack.client.event.events.TickEvent;
 import dev.nhack.client.module.Category;
 import dev.nhack.client.module.Module;
 import dev.nhack.client.module.SubCategory;
-import dev.nhack.client.setting.NumberSetting;
+import dev.nhack.client.util.ChatUtil;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.shapes.Shapes;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Port of Meteor Client's {@code Xray} (render category) for nhack.
  *
  * <p>Two things are locked compared to the original:
  * <ul>
- *     <li>{@code exposed-only} is always on and has no setting — ores buried in solid rock stay hidden,</li>
+ *     <li>{@code exposed-only} is always on and has no setting — ore buried inside solid rock never shows,</li>
  *     <li>the whitelist is fixed to diamond ore + deepslate diamond ore, nothing else ever lights up.</li>
  * </ul>
  *
- * <p>Rendering hooks live in {@code ModelBlockRendererMixin} (per-block alpha + face culling),
- * {@code ItemBlockRenderTypesMixin} (moves ghosted blocks into the translucent layer so alpha actually blends),
- * {@code VisGraphMixin} (disables chunk occlusion, so you can look through the world),
- * {@code BlockBehaviourMixin} (kills ambient occlusion shading) and
- * {@code BlockEntityRenderDispatcherMixin} (hides chests / furnaces / ... together with the blocks).
+ * <p>Meteor fades the rest of the world out with a per-quad alpha. nhack instead skips the geometry of
+ * every blocked block completely (Meteor's {@code alpha == 0} path), which keeps the module identical
+ * with and without Sodium: partial alpha would have to be written into Sodium's own quad buffer, and
+ * that needs a compile time dependency on Sodium. Skipping is also cheaper — no translucent layer
+ * sorting for thousands of ghosted quads.
+ *
+ * <p>Vanilla render hooks: {@code ModelBlockRendererMixin} (block models + face culling),
+ * {@code LiquidBlockRendererMixin} (water/lava), {@code VisGraphMixin} (chunk occlusion),
+ * {@code BlockBehaviourMixin} (ambient occlusion shade) and {@code BlockEntityRenderDispatcherMixin}
+ * (chests, furnaces, ...). With Sodium installed the vanilla chunk pipeline is replaced, so block models,
+ * face culling and fluids are hooked again in {@code dev.nhack.client.mixin.sodium}; chunk occlusion and
+ * block entities keep working through the vanilla hooks because Sodium still calls into them.
+ *
+ * <p>Every hook injects with {@code require = 0} and reports itself here, so a Minecraft or Sodium update
+ * that renames a target degrades into a chat message instead of a crash on startup.
  */
 public final class XrayModule extends Module {
-	/** Locked whitelist — the only blocks that keep rendering normally. */
+	/** Locked whitelist — the only blocks that keep rendering. */
 	public static final List<Block> ORES = List.of(Blocks.DIAMOND_ORE, Blocks.DEEPSLATE_DIAMOND_ORE);
 
 	/** Always {@code true} on purpose: there is no setting to turn it off. */
 	public static final boolean EXPOSED_ONLY = true;
 
+	/** Hook ids that ran at least once since the module was enabled. */
+	private static final Set<String> FIRED = ConcurrentHashMap.newKeySet();
+
+	/** Chunk meshes are built on worker threads, so the scratch position has to be per thread. */
 	private static final ThreadLocal<BlockPos.MutableBlockPos> EXPOSED_POS = ThreadLocal.withInitial(BlockPos.MutableBlockPos::new);
 
-	/** Cached for the mixins, they run on chunk builder threads and can't afford a lookup per block. */
+	/** Cached for the mixins, they run on chunk builder threads and can't afford a module lookup per block. */
 	private static volatile XrayModule instance;
 
-	private final NumberSetting opacity = addSetting(new NumberSetting(
-		"Opacity",
-		"Alpha of every other block (0 = invisible, 255 = normal)",
-		25,
-		0,
-		255,
-		1
-	));
-
-	private boolean pendingReload;
+	/** Ticks until the "did my hooks apply?" check runs, {@code -1} when nothing is pending. */
+	private int checkIn = -1;
 
 	public XrayModule() {
-		super("Xray", "Ghost world that only lights up exposed diamond ore — exposed-only is locked on", Category.SKYGAMES, SubCategory.TESTING);
-		opacity.onChanged(() -> {
-			if (isEnabled()) {
-				pendingReload = true;
-			}
-		});
+		super("Xray", "Hides the world and only shows exposed diamond ore — exposed-only is locked on", Category.SKYGAMES, SubCategory.TESTING);
 		instance = this;
 	}
 
@@ -75,45 +78,27 @@ public final class XrayModule extends Module {
 	}
 
 	/**
-	 * Alpha this block should be drawn with.
-	 *
-	 * @param pos block position, {@code null} when the caller has none (layer selection) — then exposure is ignored
-	 * @return {@code -1} when xray is off or the block is a visible ore, otherwise {@code 0..255}
+	 * Everything that is not an exposed diamond ore is "blocked" and its geometry is skipped.
+	 * Always {@code false} while the module is off, so the hooks cost one volatile read.
 	 */
-	public static int alpha(BlockState state, BlockPos pos) {
+	public static boolean isBlocked(BlockState state, BlockPos pos) {
 		XrayModule module = instance;
 		if (module == null || !module.isEnabled()) {
-			return -1;
-		}
-		return module.isBlocked(state.getBlock(), pos) ? module.opacity.getInt() : -1;
-	}
-
-	/** Everything that isn't an exposed diamond ore is "blocked" and gets the ghost treatment. */
-	public boolean isBlocked(Block block, BlockPos pos) {
-		return !(ORES.contains(block) && (!EXPOSED_ONLY || pos == null || isExposed(pos)));
-	}
-
-	/**
-	 * Forces the faces of visible ores to draw even when they touch a ghosted block.
-	 * Ported from {@code Xray#modifyDrawSide}.
-	 */
-	public boolean modifyDrawSide(BlockState state, BlockGetter level, BlockPos pos, Direction facing, boolean returns) {
-		if (!returns && !isBlocked(state.getBlock(), pos)) {
-			BlockPos adjPos = pos.relative(facing);
-			BlockState adjState = level.getBlockState(adjPos);
-			return adjState.getFaceOcclusionShape(facing.getOpposite()) != Shapes.block()
-				|| adjState.getBlock() != state.getBlock()
-				|| !adjState.isSolidRender()
-				|| isBlocked(adjState.getBlock(), adjPos);
+			return false;
 		}
 
-		return returns;
+		return !(ORES.contains(state.getBlock()) && (!EXPOSED_ONLY || isExposed(pos)));
+	}
+
+	/** True for the two whitelisted ores, used to force their faces to render. */
+	public static boolean isOre(BlockState state) {
+		return ORES.contains(state.getBlock());
 	}
 
 	/** True when at least one of the six neighbours isn't a solid full cube (air, cave, water, ...). */
 	public static boolean isExposed(BlockPos pos) {
 		ClientLevel level = Minecraft.getInstance().level;
-		if (level == null) {
+		if (level == null || pos == null) {
 			return false;
 		}
 
@@ -127,26 +112,66 @@ public final class XrayModule extends Module {
 		return false;
 	}
 
+	/** Called by every render hook the first thing it does, so a missing mixin can be reported. */
+	public static void hookFired(String id) {
+		FIRED.add(id);
+	}
+
 	@Override
 	protected void onEnable() {
+		FIRED.clear();
+		checkIn = 60;
 		reload();
 	}
 
 	@Override
 	protected void onDisable() {
+		checkIn = -1;
 		reload();
 	}
 
 	@Override
 	public void onTick(TickEvent.Post event) {
-		if (pendingReload) {
-			pendingReload = false;
-			reload();
+		if (checkIn < 0) {
+			return;
+		}
+
+		// No world yet (main menu) — nothing can render, wait instead of reporting a false failure.
+		if (Minecraft.getInstance().level == null) {
+			checkIn = 60;
+			return;
+		}
+
+		if (--checkIn > 0) {
+			return;
+		}
+		checkIn = -1;
+
+		List<String> missing = new ArrayList<>();
+		for (String hook : expectedHooks()) {
+			if (!FIRED.contains(hook)) {
+				missing.add(hook);
+			}
+		}
+
+		if (!missing.isEmpty()) {
+			ChatUtil.error("Xray: render hooks didn't apply (" + String.join(", ", missing) + ") — send latest.log");
 		}
 	}
 
-	/** Rebuilds every loaded section — batched to one call per tick so slider drags stay smooth. */
-	private void reload() {
+	/** Hooks that must fire for any block within a few seconds of enabling, for the renderer in use. */
+	private static List<String> expectedHooks() {
+		List<String> hooks = new ArrayList<>(List.of("occlusion", "shade"));
+		if (FabricLoader.getInstance().isModLoaded("sodium")) {
+			hooks.add("sodium-blocks");
+		} else {
+			hooks.add("blocks");
+		}
+		return hooks;
+	}
+
+	/** Rebuilds every loaded section so the change shows up immediately. */
+	private static void reload() {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc != null && mc.levelRenderer != null) {
 			mc.levelRenderer.allChanged();
