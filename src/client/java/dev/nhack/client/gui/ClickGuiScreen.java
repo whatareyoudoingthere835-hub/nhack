@@ -5,6 +5,7 @@ import dev.nhack.client.config.ConfigManager;
 import dev.nhack.client.module.Category;
 import dev.nhack.client.module.Module;
 import dev.nhack.client.module.ModuleManager;
+import dev.nhack.client.module.SubCategory;
 import dev.nhack.client.module.modules.client.ClickGuiModule;
 import dev.nhack.client.setting.BindSetting;
 import dev.nhack.client.setting.BoolSetting;
@@ -22,6 +23,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public final class ClickGuiScreen extends Screen {
@@ -41,6 +43,7 @@ public final class ClickGuiScreen extends Screen {
 	private int dragOffY;
 
 	private Category selected = Category.COMBAT;
+	private SubCategory selectedSub = SubCategory.COMBAT;
 	private Module focused;
 	private Module binding;
 	private BindSetting bindingSetting;
@@ -96,19 +99,61 @@ public final class ClickGuiScreen extends Screen {
 	}
 
 	private void renderSidebar(GuiGraphics graphics, Font font, int mouseX, int mouseY) {
+		for (SidebarRow row : sidebarRows()) {
+			int x1 = winX + rowX(row);
+			int x2 = winX + SIDEBAR - 8;
+			int y = row.y();
+			int height = row.height();
+
+			if (row.sub()) {
+				graphics.fill(winX + 12, y, winX + 13, y + height, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x44));
+			}
+
+			boolean hover = hovered(mouseX, mouseY, x1, y, x2 - x1, height);
+			boolean on = row.category() == selected && (!row.sub() || row.subCategory() == selectedSub);
+			if (on) {
+				graphics.fill(x1, y, x2, y + height, ColorUtil.ROW_ACTIVE);
+				graphics.fill(x1, y, x1 + 2, y + height, ColorUtil.ACCENT);
+			} else if (hover) {
+				graphics.fill(x1, y, x2, y + height, ColorUtil.ROW_HOVER);
+			}
+
+			String label = row.sub() ? row.subCategory().getDisplayName() : row.category().getDisplayName();
+			graphics.drawString(font, label, x1 + 10, y + (height - 8) / 2, on ? ColorUtil.TEXT : ColorUtil.TEXT_DIM);
+		}
+	}
+
+	/** Categories plus, under the selected one, its sub tabs (SkyEgames -> Combat / Movement / Misc / Testing / !Detected!). */
+	private List<SidebarRow> sidebarRows() {
+		List<SidebarRow> rows = new ArrayList<>();
 		int y = winY + HEADER + 8;
 		for (Category category : Category.values()) {
-			boolean hover = hovered(mouseX, mouseY, winX + 8, y, SIDEBAR - 16, 26);
-			boolean on = category == selected;
-			if (on) {
-				graphics.fill(winX + 8, y, winX + SIDEBAR - 8, y + 26, ColorUtil.ROW_ACTIVE);
-				graphics.fill(winX + 8, y, winX + 10, y + 26, ColorUtil.ACCENT);
-			} else if (hover) {
-				graphics.fill(winX + 8, y, winX + SIDEBAR - 8, y + 26, ColorUtil.ROW_HOVER);
-			}
-			graphics.drawString(font, category.getDisplayName(), winX + 18, y + 9, on ? ColorUtil.TEXT : ColorUtil.TEXT_DIM);
+			rows.add(new SidebarRow(category, null, y, 26, false));
 			y += 30;
+			if (category == selected && category.hasSubCategories()) {
+				for (SubCategory subCategory : category.getSubCategories()) {
+					rows.add(new SidebarRow(category, subCategory, y, 20, true));
+					y += 22;
+				}
+				y += 6;
+			}
 		}
+		return rows;
+	}
+
+	private static int rowX(SidebarRow row) {
+		return row.sub() ? 18 : 8;
+	}
+
+	private List<Module> currentModules() {
+		return ModuleManager.getByCategory(selected, selected.hasSubCategories() ? selectedSub : null);
+	}
+
+	private boolean isVisible(Module module) {
+		return module != null && module.isIn(selected, selected.hasSubCategories() ? selectedSub : null);
+	}
+
+	private record SidebarRow(Category category, SubCategory subCategory, int y, int height, boolean sub) {
 	}
 
 	private void renderModules(GuiGraphics graphics, Font font, int mouseX, int mouseY) {
@@ -120,7 +165,7 @@ public final class ClickGuiScreen extends Screen {
 
 		enableScissor(graphics, listX, listY, listX + listW, listY + listH);
 
-		List<Module> modules = ModuleManager.getByCategory(selected);
+		List<Module> modules = currentModules();
 		if (modules.isEmpty()) {
 			String empty = "Nothing here yet";
 			graphics.drawString(font, empty, listX + (listW - font.width(empty)) / 2, listY + listH / 2 - 4, ColorUtil.TEXT_DIM);
@@ -153,7 +198,7 @@ public final class ClickGuiScreen extends Screen {
 		int sw = SETTINGS;
 		int sh = WINDOW_H - HEADER;
 
-		if (focused == null || focused.getCategory() != selected) {
+		if (!isVisible(focused)) {
 			String hint = "Select a module";
 			graphics.drawString(font, hint, sx + (sw - font.width(hint)) / 2, sy + sh / 2 - 4, ColorUtil.TEXT_DIM);
 			return;
@@ -253,18 +298,12 @@ public final class ClickGuiScreen extends Screen {
 			return true;
 		}
 
-		int tabY = winY + HEADER + 8;
-		for (Category category : Category.values()) {
-			if (hovered(mouseX, mouseY, winX + 8, tabY, SIDEBAR - 16, 26)) {
-				selected = category;
-				if (focused != null && focused.getCategory() != selected) {
-					focused = null;
-				}
-				moduleScroll = 0;
-				settingScroll = 0;
+		for (SidebarRow row : sidebarRows()) {
+			int x1 = rowX(row);
+			if (hovered(mouseX, mouseY, winX + x1, row.y(), SIDEBAR - 8 - x1, row.height())) {
+				selectTab(row);
 				return true;
 			}
-			tabY += 30;
 		}
 
 		if (handleModuleClick(mouseX, mouseY, button)) {
@@ -274,6 +313,20 @@ public final class ClickGuiScreen extends Screen {
 			return true;
 		}
 		return true;
+	}
+
+	private void selectTab(SidebarRow row) {
+		selected = row.category();
+		if (row.sub()) {
+			selectedSub = row.subCategory();
+		} else if (row.category().hasSubCategories() && !row.category().getSubCategories().contains(selectedSub)) {
+			selectedSub = row.category().getSubCategories().get(0);
+		}
+		if (!isVisible(focused)) {
+			focused = null;
+		}
+		moduleScroll = 0;
+		settingScroll = 0;
 	}
 
 	private boolean handleModuleClick(int mouseX, int mouseY, int button) {
@@ -286,7 +339,7 @@ public final class ClickGuiScreen extends Screen {
 		}
 
 		int cursor = listY + PAD - moduleScroll;
-		for (Module module : ModuleManager.getByCategory(selected)) {
+		for (Module module : currentModules()) {
 			if (hovered(mouseX, mouseY, listX + 8, cursor, listW - 16, ROW)) {
 				if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
 					if (hovered(mouseX, mouseY, listX + listW - 40, cursor, 32, ROW)) {
@@ -314,7 +367,7 @@ public final class ClickGuiScreen extends Screen {
 	}
 
 	private boolean handleSettingClick(int mouseX, int mouseY, int button) {
-		if (focused == null || focused.getCategory() != selected) {
+		if (!isVisible(focused)) {
 			return false;
 		}
 
@@ -406,7 +459,7 @@ public final class ClickGuiScreen extends Screen {
 		int delta = (int) (-scrollY * 14);
 
 		if (hovered(mouseX, mouseY, listX, listY, listW, listH)) {
-			int max = Math.max(0, ModuleManager.getByCategory(selected).size() * (ROW + 4) - listH + 20);
+			int max = Math.max(0, currentModules().size() * (ROW + 4) - listH + 20);
 			moduleScroll = Math.max(0, Math.min(max, moduleScroll + delta));
 			return true;
 		}

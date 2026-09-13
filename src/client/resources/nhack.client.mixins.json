@@ -10,7 +10,13 @@
 		"ClientCommonPacketListenerImplMixin",
 		"ConnectionMixin",
 		"DeltaTrackerTimerMixin",
-		"EntityMixin"
+		"EntityMixin",
+		"ModelBlockRendererMixin",
+		"ItemBlockRenderTypesMixin",
+		"LiquidBlockRendererMixin",
+		"VisGraphMixin",
+		"BlockBehaviourMixin",
+		"BlockEntityRenderDispatcherMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

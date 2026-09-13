@@ -14,6 +14,7 @@ import dev.nhack.client.module.modules.movement.SprintModule;
 import dev.nhack.client.module.modules.movement.TimerModule;
 import dev.nhack.client.module.modules.render.EspModule;
 import dev.nhack.client.module.modules.render.FullbrightModule;
+import dev.nhack.client.module.modules.skyegames.XrayModule;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
 import org.lwjgl.glfw.GLFW;
@@ -43,6 +44,7 @@ public final class ModuleManager {
 		register(new FullbrightModule());
 		register(new EspModule());
 		register(new ExampleModule());
+		register(new XrayModule());
 
 		MODULES.sort(Comparator.comparing(Module::getName, String.CASE_INSENSITIVE_ORDER));
 		NHack.LOGGER.info("Registered {} modules", MODULES.size());
@@ -58,6 +60,11 @@ public final class ModuleManager {
 
 	public static List<Module> getByCategory(Category category) {
 		return MODULES.stream().filter(module -> module.getCategory() == category).toList();
+	}
+
+	/** Modules of a category filtered by one of its sub tabs ({@code null} = every sub tab). */
+	public static List<Module> getByCategory(Category category, SubCategory subCategory) {
+		return MODULES.stream().filter(module -> module.isIn(category, subCategory)).toList();
 	}
 
 	public static List<Module> getEnabled() {

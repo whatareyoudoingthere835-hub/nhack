@@ -2,11 +2,14 @@ package dev.nhack.client.setting;
 
 import com.google.gson.JsonElement;
 
+import java.util.Objects;
+
 public abstract class Setting<T> {
 	private final String name;
 	private final String description;
 	private T value;
 	private final T defaultValue;
+	private Runnable onChanged;
 
 	protected Setting(String name, String description, T defaultValue) {
 		this.name = name;
@@ -28,7 +31,21 @@ public abstract class Setting<T> {
 	}
 
 	public void set(T value) {
-		this.value = sanitize(value);
+		T next = sanitize(value);
+		if (Objects.equals(this.value, next)) {
+			return;
+		}
+
+		this.value = next;
+		if (onChanged != null) {
+			onChanged.run();
+		}
+	}
+
+	/** Runs whenever {@link #set(Object)} actually changes the value (GUI, commands and config all go through it). */
+	public Setting<T> onChanged(Runnable action) {
+		this.onChanged = action;
+		return this;
 	}
 
 	public T getDefault() {
@@ -36,7 +53,7 @@ public abstract class Setting<T> {
 	}
 
 	public void reset() {
-		this.value = defaultValue;
+		set(defaultValue);
 	}
 
 	protected T sanitize(T value) {

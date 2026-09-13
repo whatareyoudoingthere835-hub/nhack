@@ -37,7 +37,7 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 
 - Кастомное главное меню (звёздное небо). «Back to default menu» возвращает ванильный Title Screen.
 - **Right Shift** — одно окно ClickGUI (стекло + блюр мира)
-- вкладки слева выбирают категорию
+- вкладки слева выбирают категорию, у **SkyEgames** раскрываются подвкладки (Combat / Movement / Misc / Testing / !Detected!)
 - ЛКМ по модулю — открыть настройки справа, тумблер — вкл/выкл
 - ПКМ по модулю — сразу тоггл
 - СКМ / строка Bind — назначить клавишу, `Esc`/`Delete` — снять
@@ -61,13 +61,27 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 
 **ESP** (Render): 2D-боксы, HP, TNT, перлы, burrow, маяки, lingering clouds.
 
+**Xray** (SkyEgames → Testing): порт `Xray` из Meteor Client. Мир становится полупрозрачным (`Opacity`, 0–255, по умолчанию 25),
+целиком подсвечиваются **только `diamond_ore` и `deepslate_diamond_ore`**. `exposed-only` зашит в код и всегда включён —
+руда, замурованная в камне, не светится, видно только ту, что уже открыта (пещера, воздух, вода). Вайтлист тоже залочен,
+настройки блоков нет. Вместе с блоками прячутся block entity (сундуки, печи, кровати...), отключается chunk occlusion
+и ambient occlusion. Перезагрузка чанков — при вкл/выкл и раз в тик после изменения `Opacity`.
+
 Конфиг пишется в `.minecraft/config/nhack/client.json`.
 
 ## Как добавить модуль
 
 1. Скопируй `src/client/java/dev/nhack/client/module/modules/misc/ExampleModule.java`
-2. Поставь категорию (`COMBAT`, `MOVEMENT`, `RENDER`, `PLAYER`, `MISC`, `CLIENT`)
-3. Добавь настройки через `addSetting(...)`
+2. Поставь категорию (`COMBAT`, `MOVEMENT`, `RENDER`, `PLAYER`, `MISC`, `CLIENT`, `SKYGAMES`).
+   У `SKYGAMES` есть подвкладки — добавь четвёртым аргументом `SubCategory`
+   (`COMBAT`, `MOVEMENT`, `MISC`, `TESTING`, `DETECTED`):
+
+```java
+super("Xray", "What it does", Category.SKYGAMES, SubCategory.TESTING);
+```
+
+   Без `SubCategory` модуль показывается во всех подвкладках своей категории.
+3. Добавь настройки через `addSetting(...)`; если на изменение надо реагировать — `setting.onChanged(() -> ...)`
 4. Пиши логику в `onEnable` / `onDisable` / `onTick` / `onRenderHud`
 5. Зарегистрируй модуль в `ModuleManager.init()`
 
@@ -104,12 +118,12 @@ public void onPreTick(TickEvent.Pre event) { }
 src/main            общие ресурсы, fabric.mod.json
 src/client
   event/            EventBus + Tick / HUD / Key
-  module/           Module, Category, ModuleManager
+  module/           Module, Category, SubCategory, ModuleManager
   setting/          Bool / Number / Mode
   command/          .toggle .bind .help .prefix
   config/           JSON save/load
-  gui/              ClickGUI
-  mixin/            пример хука в Minecraft.tick
+  gui/              ClickGUI (вкладки категорий + подвкладки SkyEgames)
+  mixin/            хуки: тик, свет, input, пакеты и xray-рендер
   util/             чат, цвет, клавиши
 ```
 

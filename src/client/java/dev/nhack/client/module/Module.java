@@ -15,14 +15,20 @@ public abstract class Module {
 	private final String name;
 	private final String description;
 	private final Category category;
+	private final SubCategory subCategory;
 	private final List<Setting<?>> settings = new ArrayList<>();
 	private boolean enabled;
 	private int bind = GLFW.GLFW_KEY_UNKNOWN;
 
 	protected Module(String name, String description, Category category) {
+		this(name, description, category, null);
+	}
+
+	protected Module(String name, String description, Category category, SubCategory subCategory) {
 		this.name = name;
 		this.description = description;
 		this.category = category;
+		this.subCategory = subCategory;
 	}
 
 	public String getName() {
@@ -35,6 +41,22 @@ public abstract class Module {
 
 	public Category getCategory() {
 		return category;
+	}
+
+	/** {@code null} when the module sits directly in its category (no sub tabs). */
+	public SubCategory getSubCategory() {
+		return subCategory;
+	}
+
+	/**
+	 * Whether this module belongs to the given tab / sub tab combination.
+	 * A {@code null} sub category matches every module of the category.
+	 */
+	public boolean isIn(Category category, SubCategory subCategory) {
+		if (this.category != category) {
+			return false;
+		}
+		return subCategory == null || this.subCategory == null || this.subCategory == subCategory;
 	}
 
 	public boolean isEnabled() {
