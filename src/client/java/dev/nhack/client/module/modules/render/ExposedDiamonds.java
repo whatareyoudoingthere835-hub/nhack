@@ -38,6 +38,7 @@ public final class ExposedDiamonds extends Module {
 
 	private final NumberSetting radius = addSetting(new NumberSetting("Radius", "Радиус поиска в чанках, ближние сканируются первыми", 3.0, 1.0, 6.0, 1.0));
 	private final NumberSetting maxY = addSetting(new NumberSetting("MaxY", "Верхняя граница поиска по Y", ORE_MAX_Y, -64.0, 320.0, 1.0));
+	private final NumberSetting maxPerChunk = addSetting(new NumberSetting("MaxPerChunk", "Максимум меток на чанк, 0 = без лимита", 20.0, 0.0, 64.0, 1.0));
 	private final ColorSetting diamondColor = addSetting(new ColorSetting("DiamondColor", "Цвет алмаза", 0xFF00BBFF));
 
 	/** Потокобезопасный список для рендера: скан и рендер идут в клиентском потоке, но список читают итератором. */
@@ -179,6 +180,7 @@ public final class ExposedDiamonds extends Module {
 		List<BlockPos> newFound = new ArrayList<>();
 		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 		BlockPos.MutableBlockPos adjPos = new BlockPos.MutableBlockPos();
+		BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
 
 		for (int x = 0; x < 16; x++) {
 			for (int z = 0; z < 16; z++) {
@@ -187,7 +189,7 @@ public final class ExposedDiamonds extends Module {
 					BlockState state = chunk.getBlockState(pos);
 
 					if (state != null && (state.is(Blocks.DIAMOND_ORE) || state.is(Blocks.DEEPSLATE_DIAMOND_ORE))) {
-						if (isExposed(level, pos, adjPos)) {
+						if (isExposed(level, pos, adjPos, probe)) {
 							newFound.add(pos.immutable());
 						}
 					}
@@ -195,17 +197,39 @@ public final class ExposedDiamonds extends Module {
 			}
 		}
 
+		int cap = maxPerChunk.getInt();
+		if (cap > 0 && newFound.size() > cap) {
+			// «Алмазное море» анархии: из чанка берём только ближайшие к игроку, иначе экран
+			// тонет в тысячах меток, а рендер кладёт FPS.
+			double px = mc.player.getX();
+			double py = mc.player.getY();
+			double pz = mc.player.getZ();
+			newFound.sort(Comparator.comparingDouble(p -> {
+				double dx = p.getX() + 0.5 - px;
+				double dy = p.getY() + 0.5 - py;
+				double dz = p.getZ() + 0.5 - pz;
+				return dx * dx + dy * dy + dz * dz;
+			}));
+			newFound = new ArrayList<>(newFound.subList(0, cap));
+		}
+
 		// Чанк пересканирован — старые отметки из него заменяем свежими.
 		foundDiamonds.removeIf(p -> (p.getX() >> 4) == chunkX && (p.getZ() >> 4) == chunkZ);
 		foundDiamonds.addAll(newFound);
 	}
 
-	/** Руда считается открытой, если хотя бы одна соседняя клетка — воздух, жидкость или не сплошной блок. */
-	private boolean isExposed(Level level, BlockPos pos, BlockPos.MutableBlockPos adjPos) {
+	/**
+	 * Руда считается открытой, только если рядом настоящая полость: воздушный сосед засчитывается,
+	 * когда сам касается ещё хотя бы одного воздуха (пещера, штрек, разлом), а одиночный карман
+	 * в один блок внутри камня — нет. Вода и лава считаются всегда: через них руда видна.
+	 *
+	 * <p>Соседи из незагруженных чанков читаются ванилью как воздух, поэтому пропускаются явно —
+	 * иначе граница загрузки превращала бы всю руду на краю области в «открытую».
+	 */
+	private boolean isExposed(Level level, BlockPos pos, BlockPos.MutableBlockPos adjPos, BlockPos.MutableBlockPos probe) {
 		for (Direction dir : Direction.values()) {
 			adjPos.setWithOffset(pos, dir);
-			if (!level.isInsideBuildHeight(adjPos.getY())) {
-				// Сосед за границей мира (например, ниже bedrock) — это не «открытость».
+			if (!level.isInsideBuildHeight(adjPos.getY()) || !level.hasChunkAt(adjPos)) {
 				continue;
 			}
 
@@ -213,7 +237,28 @@ public final class ExposedDiamonds extends Module {
 			if (adjState == null) {
 				continue;
 			}
-			if (adjState.isAir() || !adjState.getFluidState().isEmpty() || !adjState.isSolidRender()) {
+			if (adjState.isAir()) {
+				if (airTouchesAir(level, adjPos, probe)) {
+					return true;
+				}
+				continue;
+			}
+			if (!adjState.getFluidState().isEmpty()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** У воздушной клетки должен быть ещё один воздушный сосед: карман 1×1 в камне — не пещера. */
+	private boolean airTouchesAir(Level level, BlockPos airPos, BlockPos.MutableBlockPos probe) {
+		for (Direction dir : Direction.values()) {
+			probe.setWithOffset(airPos, dir);
+			if (!level.isInsideBuildHeight(probe.getY()) || !level.hasChunkAt(probe)) {
+				continue;
+			}
+			BlockState state = level.getBlockState(probe);
+			if (state != null && state.isAir()) {
 				return true;
 			}
 		}
