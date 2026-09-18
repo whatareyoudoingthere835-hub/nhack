@@ -14,7 +14,6 @@ import dev.nhack.client.module.modules.movement.SprintModule;
 import dev.nhack.client.module.modules.movement.TimerModule;
 import dev.nhack.client.module.modules.render.EspModule;
 import dev.nhack.client.module.modules.render.FullbrightModule;
-import dev.nhack.client.module.modules.skyegames.XrayModule;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
 import org.lwjgl.glfw.GLFW;
@@ -44,7 +43,6 @@ public final class ModuleManager {
 		register(new FullbrightModule());
 		register(new EspModule());
 		register(new ExampleModule());
-		register(new XrayModule());
 
 		MODULES.sort(Comparator.comparing(Module::getName, String.CASE_INSENSITIVE_ORDER));
 		NHack.LOGGER.info("Registered {} modules", MODULES.size());

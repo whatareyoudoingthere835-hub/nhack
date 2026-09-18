@@ -10,15 +10,10 @@
 		"ClientCommonPacketListenerImplMixin",
 		"ConnectionMixin",
 		"DeltaTrackerTimerMixin",
-		"EntityMixin",
-		"ModelBlockRendererMixin",
-		"LiquidBlockRendererMixin",
-		"VisGraphMixin",
-		"BlockBehaviourMixin",
-		"BlockEntityRenderDispatcherMixin"
+		"EntityMixin"
 	],
 	"injectors": {
-		"defaultRequire": 1
+		"defaultRequire": 0
 	},
 	"overwrites": {
 		"requireAnnotations": true
