@@ -2,6 +2,7 @@ package dev.nhack.client.mixin;
 
 import dev.nhack.client.module.ModuleManager;
 import dev.nhack.client.module.modules.movement.NoSlowModule;
+import dev.nhack.client.util.CombatUtil;
 import dev.nhack.client.util.RotationUtil;
 import dev.nhack.client.util.TickManager;
 import net.minecraft.client.player.ClientInput;
@@ -16,6 +17,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(LocalPlayer.class)
 public class LocalPlayerMixin {
+	/**
+	 * Сброс спринта руками античит ловит: пакет должен уйти из ванильного места. Первая строка
+	 * {@code sendPosition} — это {@code sendIsSprintingIfNeeded()}, поэтому снимаем флаг на HEAD
+	 * и ваниль сама отправляет {@code STOP_SPRINTING} ровно там, где отправляет его обычный игрок.
+	 */
+	@Inject(method = "sendPosition", at = @At("HEAD"))
+	private void nhack$sprintReset(CallbackInfo ci) {
+		if (CombatUtil.consumeSprintDrop()) {
+			((LocalPlayer) (Object) this).setSprinting(false);
+		}
+	}
+
 	@Inject(method = "sendPosition", at = @At("HEAD"))
 	private void nhack$applyAuraRotation(CallbackInfo ci) {
 		if (!RotationUtil.active) {

@@ -7,10 +7,12 @@ import dev.nhack.client.event.events.RenderEvent;
 import dev.nhack.client.event.events.TickEvent;
 import dev.nhack.client.module.Category;
 import dev.nhack.client.module.Module;
+import dev.nhack.client.module.ModuleManager;
 import dev.nhack.client.setting.BoolSetting;
 import dev.nhack.client.setting.ModeSetting;
 import dev.nhack.client.setting.NumberSetting;
 import dev.nhack.client.util.ColorUtil;
+import dev.nhack.client.util.CombatUtil;
 import dev.nhack.client.util.FriendManager;
 import dev.nhack.client.util.InventoryUtil;
 import dev.nhack.client.util.MathUtil;
@@ -117,6 +119,12 @@ public final class AuraModule extends Module {
 	@Override
 	protected void onEnable() {
 		Minecraft mc = Minecraft.getInstance();
+		// Две ауры одновременно писать в RotationUtil не могут: наводка превращается в кашу.
+		ModuleManager.get(KillAuraModule.class).ifPresent(other -> {
+			if (other.isEnabled()) {
+				other.setEnabled(false, false);
+			}
+		});
 		target = null;
 		aimTarget = null;
 		aiming = false;
@@ -288,7 +296,9 @@ public final class AuraModule extends Module {
 
 	@Subscribe
 	public void onPacketSend(PacketSendEvent event) {
-		if (target == null || sendingAttack) {
+		// CombatUtil.isSendingAttack() — бьёт вторая аура (KillAura): её пакеты глушить нельзя,
+		// иначе удар просто не доходит до сервера.
+		if (target == null || sendingAttack || CombatUtil.isSendingAttack()) {
 			return;
 		}
 		if (event.packet() instanceof ServerboundInteractPacket) {

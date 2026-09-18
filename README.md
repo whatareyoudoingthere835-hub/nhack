@@ -21,7 +21,7 @@
 ./gradlew build
 ```
 
-Готовый jar: `build/libs/nhack-<version>.jar` (сейчас `nhack-1.0.4.jar`)
+Готовый jar: `build/libs/nhack-<version>.jar` (сейчас `nhack-1.0.5.jar`)
 
 Положи его в `.minecraft/mods` вместе с [Fabric API](https://modrinth.com/mod/fabric-api) для 1.21.11.
 
@@ -45,7 +45,7 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 
 ```
 .help
-.toggle Aura
+.toggle KillAura
 .bind Fullbright G
 .friend add Steve
 .prefix ,
@@ -73,7 +73,29 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 `DelayJitter` добавляет ±N тиков к `AttackDelay`, чтобы интервал между ударами не был идеально ровным
 (ровный CPS — признак автокликера). В меню/инвентаре и на паузе модуль не наводится и не бьёт.
 
-**Test** (Combat) — обучаемая киллаура. Зажми **Record**-банд: появляется фейк-игрок, на которого ты наводишься, и модуль записывает твои микродвижения мыши. Потом он повторяет их на реальных целях с той же скоростью — поворот по кривой, а не по прямой. Настройки: `Range` (2.9–4 блока), `Rotation` (Curved — запись / Straight — прямая), `MissChance` (0–99%, при промахе просто не бьёт), `Silent` (только тело / тело+камера), `Speed`, `RotationSpeed`, `AttackDelay`, `Targets`.
+**KillAura** (Combat, класс `KillAuraModule`, раньше `TestModule` и тоже «Aura») — аура под Sloth / Polar / Fantime.
+Настройки: `Rotation` (`Sloth/Polar` — аккуратная наводка, `Fantime` — вдвое быстрее; GCD соблюдается в обоих),
+`Targets` (Players / All / Mobs), `Range` (2.5–6, дефолт 3.0 = ванильный reach), `FOV`, `Speed` (градусов за тик,
+дефолт 18), `Jitter` (разброс скорости наводки, %), `OnlyCrits` (бить только в падении), `SmartSprint` (сброс
+спринта перед ударом), `Silent` (поворот только для сервера, камера не двигается), `Raytrace` (строгий чек хитбокса
+и стены). Кулдаун оружия не форсируется: удар ждёт `getAttackStrengthScale(0.5F) >= 0.9`.
+
+> Имя модуля пришлось сменить: раньше и `AuraModule`, и `TestModule` назывались `"Aura"`. Конфиг пишется по имени
+> (`modules.add(module.getName(), ...)`), поэтому вторая аура молча перетирала первую, обе читали один и тот же блок
+> настроек (включая `enabled`), а `.toggle KillAura` дёргал всегда первую. После переименования блок `"Aura"` в
+> `config/nhack/client.json` остаётся за `AuraModule`, а настройки KillAura один раз сбросятся в дефолты — их там
+> просто ещё нет.
+
+Как это устроено (важно при правке):
+
+- удар уходит в `TickEvent.Pre`, то есть **до** пакета движения своего тика — ваниль шлёт боевые пакеты из
+  `handleKeybinds()` раньше `LocalPlayer.sendPosition()`;
+- «смотрим ли в цель» проверяется по `RotationUtil.sentYaw/sentPitch` — повороту, который сервер уже получил;
+- наводка считается каждый кадр в `KillAuraModule.onRender` (`RenderEvent`), скорость не зависит от FPS;
+- каждая дельта поворота приводится к сетке мыши в `RotationUtil.quantize` (`(float)(counts * sens) * 0.15F`,
+  `sens = (sensitivity * 0.6 + 0.2)^3 * 8`) — иначе GCD-проверка ловит за секунды;
+- сброс спринта делает `LocalPlayerMixin.nhack$sprintReset` на HEAD `sendPosition`: флаг снимается до
+  `sendIsSprintingIfNeeded()`, поэтому `STOP_SPRINTING` отправляет сама ваниль и в правильном месте очереди.
 
 **Timer** (Movement): Normal / Matrix / Shift / Grim, OnFlag, auto-disable.
 
