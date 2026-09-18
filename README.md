@@ -21,7 +21,7 @@
 ./gradlew build
 ```
 
-Готовый jar: `build/libs/nhack-<version>.jar` (сейчас `nhack-1.0.5.jar`)
+Готовый jar: `build/libs/nhack-<version>.jar` (сейчас `nhack-1.0.6.jar`)
 
 Положи его в `.minecraft/mods` вместе с [Fabric API](https://modrinth.com/mod/fabric-api) для 1.21.11.
 
@@ -82,7 +82,7 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 
 > Имя модуля пришлось сменить: раньше и `AuraModule`, и `TestModule` назывались `"Aura"`. Конфиг пишется по имени
 > (`modules.add(module.getName(), ...)`), поэтому вторая аура молча перетирала первую, обе читали один и тот же блок
-> настроек (включая `enabled`), а `.toggle KillAura` дёргал всегда первую. После переименования блок `"Aura"` в
+> настроек (включая `enabled`), а `.toggle Aura` дёргал всегда первую (`AuraModule`). После переименования блок `"Aura"` в
 > `config/nhack/client.json` остаётся за `AuraModule`, а настройки KillAura один раз сбросятся в дефолты — их там
 > просто ещё нет.
 
@@ -113,6 +113,23 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 Энде лишнее не перебирается). На экране — квадратик, подпись `DIAMOND` и дистанция в метрах. Мир не
 перестраивается и блоки не прячутся, поэтому с Sodium и без него модуль работает одинаково. Настроек три:
 `Radius`, `MaxY`, `DiamondColor`.
+
+**1.12.2?** (Client, класс `RgbModule`) — привет из старых клиентов: все интерфейсы чита переливаются RGB
+**слева направо**. Красятся ClickGUI (рамка окна, верхняя линия, маркеры вкладок, активная строка, полосы
+слайдеров, переключатели, названия модулей и заголовок), HUD (плашка watermark и каждый элемент аррайлиста),
+главное меню (рамка панели, заголовок, кнопки, ссылка «Back») и префикс в чате. Фон и обычный текст остаются
+статичными, иначе это не читается.
+
+Оттенок берётся из `ColorUtil.rgb(x, y)` — от экранной координаты X и времени, поэтому разные окна и разные
+строки внутри одного окна окрашены по-разному, а лента постоянно едет вправо. Интерфейсы рисуют через
+`RgbUtil.fill` / `RgbUtil.text`: с выключенным модулем они вызывают обычный `graphics.fill` /
+`graphics.drawString` тем же цветом, то есть поведение один в один прежнее. Широкие полосы красятся
+вертикальными полосками по пикселю (иначе на линии в пол-окна был бы один цвет), текст — побуквенно.
+
+Настройки: `Speed` (циклов спектра в секунду, 0.05–3), `Spread` (пикселей на полный цикл, 40–800),
+`Saturation`, `Brightness`, `Tilt` (вклад Y в %, 0 = строго горизонтально), `PerCharText` (красить текст
+побуквенно), `Chat` (переливающийся префикс в чате). Ползунки применяются мгновенно — превью видно, пока
+открыт ClickGUI.
 
 > Старый `Xray` (SkyEgames → Testing, порт из Meteor Client, прятал весь мир кроме руды) вырезан из-за багов.
 > Падал он так: миксин в `ModelBlockRenderer` целился в `tesselate(BlockAndTintGetter, List, BlockState, BlockPos, ...)`,
@@ -180,15 +197,15 @@ public void onPreTick(TickEvent.Pre event) { }
 ```
 src/main            общие ресурсы, fabric.mod.json
 src/client
-  event/            EventBus + Tick / HUD / Key
+  event/            EventBus + Tick / Render (кадровый) / HUD / Key
   module/           Module, Category, SubCategory, ModuleManager
   setting/          Bool / Number / Mode
   command/          .toggle .bind .help .prefix
   config/           JSON save/load
   gui/              ClickGUI (вкладки категорий + подвкладки SkyEgames)
-  mixin/            хуки: тик, свет (Fullbright), input, пакеты, таймер, NoSlow
+  mixin/            хуки: тик, кадр (GameRenderer), свет (Fullbright), input, пакеты, таймер, NoSlow, спринт
   mixin/sodium/     зарезервировано под Sodium-хуки (папки пока нет, nhack.sodium.mixins.json пустой и required: false)
-  util/             чат, цвет, клавиши
+  util/             чат, цвет + RGB, клавиши, повороты/GCD, бой
 ```
 
 ## Версии

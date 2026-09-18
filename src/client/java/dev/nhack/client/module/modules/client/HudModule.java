@@ -8,6 +8,7 @@ import dev.nhack.client.module.ModuleManager;
 import dev.nhack.client.setting.BoolSetting;
 import dev.nhack.client.setting.NumberSetting;
 import dev.nhack.client.util.ColorUtil;
+import dev.nhack.client.util.RgbUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -38,8 +39,8 @@ public final class HudModule extends Module {
 		if (watermark.get()) {
 			String text = NHack.NAME + " " + NHack.VERSION;
 			graphics.fill(pad - 2, pad - 2, pad + font.width(text) + 4, pad + 11, ColorUtil.PANEL);
-			graphics.fill(pad - 2, pad - 2, pad, pad + 11, ColorUtil.ACCENT);
-			graphics.drawString(font, text, pad + 2, pad, ColorUtil.TEXT);
+			RgbUtil.fill(graphics, pad - 2, pad - 2, pad, pad + 11, ColorUtil.ACCENT);
+			RgbUtil.text(graphics, font, text, pad + 2, pad, ColorUtil.TEXT);
 		}
 
 		if (!arraylist.get()) {
@@ -57,8 +58,8 @@ public final class HudModule extends Module {
 			int width = font.width(name);
 			int x = graphics.guiWidth() - pad - width;
 			graphics.fill(x - 4, y - 1, graphics.guiWidth() - pad + 2, y + 10, ColorUtil.PANEL);
-			graphics.fill(graphics.guiWidth() - pad + 1, y - 1, graphics.guiWidth() - pad + 2, y + 10, ColorUtil.ACCENT);
-			graphics.drawString(font, name, x, y, ColorUtil.ENABLED);
+			RgbUtil.fill(graphics, graphics.guiWidth() - pad + 1, y - 1, graphics.guiWidth() - pad + 2, y + 10, ColorUtil.ACCENT);
+			RgbUtil.text(graphics, font, name, x, y, ColorUtil.ENABLED);
 			y += 11;
 		}
 	}

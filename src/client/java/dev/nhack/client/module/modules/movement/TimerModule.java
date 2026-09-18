@@ -12,6 +12,7 @@ import dev.nhack.client.setting.ModeSetting;
 import dev.nhack.client.setting.NumberSetting;
 import dev.nhack.client.util.ChatUtil;
 import dev.nhack.client.util.ColorUtil;
+import dev.nhack.client.util.RgbUtil;
 import dev.nhack.client.util.TickManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -171,7 +172,7 @@ public final class TimerModule extends Module {
 		GuiGraphics graphics = event.graphics();
 		Font font = Minecraft.getInstance().font;
 		String text = String.format("Timer  %.0f%%", energy * 100.0F);
-		graphics.drawString(font, text, 8, event.graphics().guiHeight() - 24, ColorUtil.TEXT);
+		RgbUtil.text(graphics, font, text, 8, graphics.guiHeight() - 24, ColorUtil.TEXT);
 	}
 
 	private void syncEnergy(LocalPlayer player) {

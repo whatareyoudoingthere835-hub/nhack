@@ -1,6 +1,7 @@
 package dev.nhack.client.gui.menu;
 
 import dev.nhack.client.util.ColorUtil;
+import dev.nhack.client.util.RgbUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -36,15 +37,20 @@ public final class MainMenuButton {
 		int y2 = Math.round(y + height);
 		boolean hovered = hovered(mouseX, mouseY, x, y, x2, y2);
 
-		graphics.fill(x, y, x2, y2, hovered ? ColorUtil.withAlpha(ColorUtil.ACCENT, 0x55) : ColorUtil.GLASS);
-		graphics.fill(x, y, x2, y + 1, hovered ? ColorUtil.ACCENT_HOVER : ColorUtil.ACCENT);
-		graphics.fill(x, y, x + 1, y2, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x66));
-		graphics.fill(x2 - 1, y, x2, y2, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x66));
+		if (hovered) {
+			// под курсором подложка акцентная — её и переливаем; обычное стекло не красим
+			RgbUtil.fill(graphics, x, y, x2, y2, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x55));
+		} else {
+			graphics.fill(x, y, x2, y2, ColorUtil.GLASS);
+		}
+		RgbUtil.fill(graphics, x, y, x2, y + 1, hovered ? ColorUtil.ACCENT_HOVER : ColorUtil.ACCENT);
+		RgbUtil.fill(graphics, x, y, x + 1, y2, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x66));
+		RgbUtil.fill(graphics, x2 - 1, y, x2, y2, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x66));
 
 		Font font = mc.font;
 		int textX = x + (Math.round(width) - font.width(name)) / 2;
 		int textY = y + Math.round(height) / 2 - 4;
-		graphics.drawString(font, name, textX, textY, hovered ? ColorUtil.TEXT : ColorUtil.TEXT_DIM);
+		RgbUtil.text(graphics, font, name, textX, textY, hovered ? ColorUtil.TEXT : ColorUtil.TEXT_DIM);
 	}
 
 	public void click(int mouseX, int mouseY) {

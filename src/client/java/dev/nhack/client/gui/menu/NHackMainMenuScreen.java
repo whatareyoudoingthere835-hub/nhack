@@ -3,6 +3,7 @@ package dev.nhack.client.gui.menu;
 import dev.nhack.NHack;
 import dev.nhack.client.gui.ClickGuiScreen;
 import dev.nhack.client.util.ColorUtil;
+import dev.nhack.client.util.RgbUtil;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -105,21 +106,21 @@ public final class NHackMainMenuScreen extends Screen {
 		int panelX = Math.round(halfW - 120);
 		int panelY = Math.round(halfH - 80);
 		graphics.fill(panelX, panelY, panelX + 240, panelY + 140, ColorUtil.GLASS);
-		graphics.fill(panelX, panelY, panelX + 240, panelY + 1, ColorUtil.ACCENT);
-		graphics.fill(panelX, panelY, panelX + 1, panelY + 140, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x66));
-		graphics.fill(panelX + 239, panelY, panelX + 240, panelY + 140, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x66));
+		RgbUtil.fill(graphics, panelX, panelY, panelX + 240, panelY + 1, ColorUtil.ACCENT);
+		RgbUtil.fill(graphics, panelX, panelY, panelX + 1, panelY + 140, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x66));
+		RgbUtil.fill(graphics, panelX + 239, panelY, panelX + 240, panelY + 140, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x66));
 
 		buttons.forEach(button -> button.render(graphics, mouseX, mouseY));
 
 		boolean logoHover = hovered(mouseX, mouseY, (int) halfW - 120, (int) halfH - 130, 240, 40);
 		String title = NHack.NAME;
-		graphics.drawString(font, title, (int) halfW - font.width(title) / 2, (int) halfH - 118, logoHover ? 0xE6FFFFFF : 0xB4FFFFFF);
+		RgbUtil.text(graphics, font, title, (int) halfW - font.width(title) / 2, (int) halfH - 118, logoHover ? 0xE6FFFFFF : 0xB4FFFFFF);
 		String version = NHack.VERSION;
 		graphics.drawString(font, version, (int) halfW - font.width(version) / 2, (int) halfH - 106, ColorUtil.TEXT_DIM);
 
 		boolean backHover = hovered(mouseX, mouseY, (int) halfW - 50, (int) halfH + 70, 100, 12);
 		String back = "<-- Back to default menu";
-		graphics.drawString(font, back, (int) halfW - font.width(back) / 2, (int) halfH + 70, backHover ? ColorUtil.TEXT : ColorUtil.withAlpha(ColorUtil.TEXT, 0x99));
+		RgbUtil.text(graphics, font, back, (int) halfW - font.width(back) / 2, (int) halfH + 70, backHover ? ColorUtil.TEXT : ColorUtil.withAlpha(ColorUtil.TEXT, 0x99));
 
 		int lineY = 10;
 		int start = Math.max(0, CHANGELOG.size() - 5);

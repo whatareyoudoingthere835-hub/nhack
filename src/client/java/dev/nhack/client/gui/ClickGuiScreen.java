@@ -14,6 +14,7 @@ import dev.nhack.client.setting.ModeSetting;
 import dev.nhack.client.setting.NumberSetting;
 import dev.nhack.client.setting.Setting;
 import dev.nhack.client.util.ColorUtil;
+import dev.nhack.client.util.RgbUtil;
 import dev.nhack.client.util.KeyUtil;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -86,10 +87,10 @@ public final class ClickGuiScreen extends Screen {
 		graphics.fill(x, y + HEADER, x + SIDEBAR, y2, ColorUtil.GLASS_DARK);
 		graphics.fill(x2 - SETTINGS, y + HEADER, x2, y2, ColorUtil.GLASS_DARK);
 		outline(graphics, x, y, x2, y2, ColorUtil.ACCENT);
-		graphics.fill(x, y, x2, y + 1, ColorUtil.ACCENT);
+		RgbUtil.fill(graphics, x, y, x2, y + 1, ColorUtil.ACCENT);
 
-		graphics.fill(x + 10, y + 9, x + 16, y + 21, ColorUtil.ACCENT);
-		graphics.drawString(font, NHack.NAME, x + 22, y + 11, ColorUtil.TEXT);
+		RgbUtil.fill(graphics, x + 10, y + 9, x + 16, y + 21, ColorUtil.ACCENT);
+		RgbUtil.text(graphics, font, NHack.NAME, x + 22, y + 11, ColorUtil.TEXT);
 		String version = NHack.VERSION;
 		graphics.drawString(font, version, x2 - 12 - font.width(version), y + 11, ColorUtil.TEXT_DIM);
 
@@ -106,20 +107,24 @@ public final class ClickGuiScreen extends Screen {
 			int height = row.height();
 
 			if (row.sub()) {
-				graphics.fill(winX + 12, y, winX + 13, y + height, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x44));
+				RgbUtil.fill(graphics, winX + 12, y, winX + 13, y + height, ColorUtil.withAlpha(ColorUtil.ACCENT, 0x44));
 			}
 
 			boolean hover = hovered(mouseX, mouseY, x1, y, x2 - x1, height);
 			boolean on = row.category() == selected && (!row.sub() || row.subCategory() == selectedSub);
 			if (on) {
-				graphics.fill(x1, y, x2, y + height, ColorUtil.ROW_ACTIVE);
-				graphics.fill(x1, y, x1 + 2, y + height, ColorUtil.ACCENT);
+				graphics.fill(x1, y, x2, y + height, ColorUtil.rowActive(x1, y));
+				RgbUtil.fill(graphics, x1, y, x1 + 2, y + height, ColorUtil.ACCENT);
 			} else if (hover) {
 				graphics.fill(x1, y, x2, y + height, ColorUtil.ROW_HOVER);
 			}
 
 			String label = row.sub() ? row.subCategory().getDisplayName() : row.category().getDisplayName();
-			graphics.drawString(font, label, x1 + 10, y + (height - 8) / 2, on ? ColorUtil.TEXT : ColorUtil.TEXT_DIM);
+			if (on) {
+				RgbUtil.text(graphics, font, label, x1 + 10, y + (height - 8) / 2, ColorUtil.TEXT);
+			} else {
+				graphics.drawString(font, label, x1 + 10, y + (height - 8) / 2, ColorUtil.TEXT_DIM);
+			}
 		}
 	}
 
@@ -178,12 +183,16 @@ public final class ClickGuiScreen extends Screen {
 			if (cursor + ROW >= listY && cursor <= listY + listH) {
 				boolean hover = hovered(mouseX, mouseY, listX + 8, cursor, listW - 16, ROW);
 				boolean on = module == focused;
-				int bg = on ? ColorUtil.ROW_ACTIVE : (hover ? ColorUtil.ROW_HOVER : ColorUtil.ROW);
+				int bg = on ? ColorUtil.rowActive(listX + 8, cursor) : (hover ? ColorUtil.ROW_HOVER : ColorUtil.ROW);
 				graphics.fill(listX + 8, cursor, listX + listW - 8, cursor + ROW, bg);
 				if (module.isEnabled()) {
-					graphics.fill(listX + 8, cursor, listX + 10, cursor + ROW, ColorUtil.ACCENT);
+					RgbUtil.fill(graphics, listX + 8, cursor, listX + 10, cursor + ROW, ColorUtil.ACCENT);
 				}
-				graphics.drawString(font, module.getName(), listX + 16, cursor + 7, module.isEnabled() ? ColorUtil.ENABLED : ColorUtil.TEXT_DIM);
+				if (module.isEnabled()) {
+					RgbUtil.text(graphics, font, module.getName(), listX + 16, cursor + 7, ColorUtil.ENABLED);
+				} else {
+					graphics.drawString(font, module.getName(), listX + 16, cursor + 7, ColorUtil.TEXT_DIM);
+				}
 				drawSwitch(graphics, listX + listW - 36, cursor + 6, module.isEnabled());
 			}
 			cursor += ROW + 4;
@@ -207,7 +216,7 @@ public final class ClickGuiScreen extends Screen {
 		enableScissor(graphics, sx, sy, sx + sw, sy + sh);
 
 		int cursor = sy + PAD - settingScroll;
-		graphics.drawString(font, focused.getName(), sx + 12, cursor, ColorUtil.TEXT);
+		RgbUtil.text(graphics, font, focused.getName(), sx + 12, cursor, ColorUtil.TEXT);
 		cursor += 14;
 		drawWrapped(graphics, font, focused.getDescription(), sx + 12, cursor, sw - 24, ColorUtil.TEXT_DIM);
 		cursor += 28;
@@ -236,8 +245,8 @@ public final class ClickGuiScreen extends Screen {
 				graphics.fill(barX, barY, barX + barW, barY + 3, 0x55000000);
 				double progress = (number.get() - number.getMin()) / (number.getMax() - number.getMin());
 				int filled = (int) (barW * progress);
-				graphics.fill(barX, barY, barX + filled, barY + 3, ColorUtil.ACCENT);
-				graphics.fill(barX + Math.max(0, filled - 1), barY - 2, barX + filled + 2, barY + 5, ColorUtil.ACCENT_HOVER);
+				RgbUtil.fill(graphics, barX, barY, barX + filled, barY + 3, ColorUtil.ACCENT);
+				RgbUtil.fill(graphics, barX + Math.max(0, filled - 1), barY - 2, barX + filled + 2, barY + 5, ColorUtil.ACCENT_HOVER);
 				cursor += 40;
 			}
 		}
@@ -249,12 +258,17 @@ public final class ClickGuiScreen extends Screen {
 		boolean hover = hovered(mouseX, mouseY, sx + 10, cursor, sw - 20, ROW);
 		graphics.fill(sx + 10, cursor, sx + sw - 10, cursor + ROW, hover ? ColorUtil.ROW_HOVER : ColorUtil.ROW);
 		graphics.drawString(font, name, sx + 16, cursor + 7, ColorUtil.TEXT_DIM);
-		graphics.drawString(font, value, sx + sw - 16 - font.width(value), cursor + 7, accentValue ? ColorUtil.ACCENT_HOVER : ColorUtil.TEXT);
+		graphics.drawString(font, value, sx + sw - 16 - font.width(value), cursor + 7,
+			accentValue ? ColorUtil.accentHover(sx + sw - 16 - font.width(value), cursor + 7) : ColorUtil.TEXT);
 		return cursor + ROW + 4;
 	}
 
 	private static void drawSwitch(GuiGraphics graphics, int x, int y, boolean on) {
-		graphics.fill(x, y, x + 20, y + 10, on ? ColorUtil.ACCENT : 0x66000000);
+		if (on) {
+			RgbUtil.fill(graphics, x, y, x + 20, y + 10, ColorUtil.ACCENT);
+		} else {
+			graphics.fill(x, y, x + 20, y + 10, 0x66000000);
+		}
 		int knob = on ? x + 11 : x + 1;
 		graphics.fill(knob, y + 1, knob + 8, y + 9, 0xFFF2F2F4);
 	}
@@ -539,10 +553,10 @@ public final class ClickGuiScreen extends Screen {
 	}
 
 	private static void outline(GuiGraphics graphics, int x1, int y1, int x2, int y2, int color) {
-		graphics.fill(x1, y1, x2, y1 + 1, color);
-		graphics.fill(x1, y2 - 1, x2, y2, ColorUtil.withAlpha(color, 0x66));
-		graphics.fill(x1, y1, x1 + 1, y2, ColorUtil.withAlpha(color, 0x88));
-		graphics.fill(x2 - 1, y1, x2, y2, ColorUtil.withAlpha(color, 0x88));
+		RgbUtil.fill(graphics, x1, y1, x2, y1 + 1, color);
+		RgbUtil.fill(graphics, x1, y2 - 1, x2, y2, ColorUtil.withAlpha(color, 0x66));
+		RgbUtil.fill(graphics, x1, y1, x1 + 1, y2, ColorUtil.withAlpha(color, 0x88));
+		RgbUtil.fill(graphics, x2 - 1, y1, x2, y2, ColorUtil.withAlpha(color, 0x88));
 	}
 
 	private static void enableScissor(GuiGraphics graphics, int x1, int y1, int x2, int y2) {

@@ -12,6 +12,7 @@ import dev.nhack.client.setting.BoolSetting;
 import dev.nhack.client.setting.ModeSetting;
 import dev.nhack.client.setting.NumberSetting;
 import dev.nhack.client.util.ColorUtil;
+import dev.nhack.client.util.RgbUtil;
 import dev.nhack.client.util.CombatUtil;
 import dev.nhack.client.util.FriendManager;
 import dev.nhack.client.util.InventoryUtil;
@@ -324,8 +325,8 @@ public final class AuraModule extends Module {
 		int x = graphics.guiWidth() / 2 - width / 2;
 		int y = graphics.guiHeight() / 2 + 18;
 		graphics.fill(x - 4, y - 3, x + width + 4, y + 11, 0x88000000);
-		graphics.fill(x - 4, y - 3, x - 2, y + 11, ColorUtil.ACCENT);
-		graphics.drawString(font, line, x, y, ColorUtil.TEXT);
+		RgbUtil.fill(graphics, x - 4, y - 3, x - 2, y + 11, ColorUtil.ACCENT);
+		RgbUtil.text(graphics, font, line, x, y, ColorUtil.TEXT);
 	}
 
 	private void attack(Minecraft mc, LocalPlayer player) {
