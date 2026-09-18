@@ -21,7 +21,7 @@
 ./gradlew build
 ```
 
-Готовый jar: `build/libs/nhack-1.0.0.jar`
+Готовый jar: `build/libs/nhack-<version>.jar` (сейчас `nhack-1.0.3.jar`)
 
 Положи его в `.minecraft/mods` вместе с [Fabric API](https://modrinth.com/mod/fabric-api) для 1.21.11.
 
@@ -61,22 +61,20 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 
 **ESP** (Render): 2D-боксы, HP, TNT, перлы, burrow, маяки, lingering clouds.
 
-**Xray** (SkyEgames → Testing): порт `Xray` из Meteor Client. Всё, кроме руды, просто перестаёт рисоваться — мир
-исчезает, и в пустоте висят **только `diamond_ore` и `deepslate_diamond_ore`**. `exposed-only` зашит в код и всегда
-включён — руда, замурованная в камне, не показывается, видна только та, что уже открыта (пещера, воздух, вода).
-Вайтлист тоже залочен, настройки блоков нет. Вместе с блоками прячутся жидкости и block entity (сундуки, печи,
-кровати...), отключаются chunk occlusion и ambient occlusion. Настроек нет — только Bind; чанки пересобираются
-при вкл/выкл.
+**CaveXRay** (Render, класс `ExposedDiamonds`): 2D-подсветка **открытой** алмазной руды — `diamond_ore` и
+`deepslate_diamond_ore`, у которых хотя бы один сосед воздух, жидкость или несплошной блок (то есть руда уже видна
+из пещеры; замурованная в камне не показывается). Чанки вокруг игрока сканируются по одному за тик в радиусе
+`Radius` (1–6 чанков), потолок поиска — `MaxY` (по умолчанию 16, дно берётся из высоты мира, так что в Незере и
+Энде лишнее не перебирается). На экране — квадратик, подпись `DIAMOND` и дистанция в метрах. Мир не
+перестраивается и блоки не прячутся, поэтому с Sodium и без него модуль работает одинаково. Настроек три:
+`Radius`, `MaxY`, `DiamondColor`.
 
-Meteor гасит мир полупрозрачностью (`opacity`), nhack вместо этого целиком пропускает геометрию заблокированных
-блоков (у Meteor это ветка `alpha == 0`). Так модуль ведёт себя одинаково с Sodium и без него: полупрозрачность
-пришлось бы писать в собственный буфер квадов Sodium, а это зависимость от Sodium на этапе компиляции. Заодно
-дешевле — не нужно сортировать тысячи ghost-квадов в translucent-слое.
-
-Работает и с Sodium: ванильный пайплайн чанков он заменяет целиком, поэтому те же решения продублированы в
-`mixin/sodium` (модели блоков, отсечение граней, жидкости). Chunk occlusion и block entity ловятся ванильными
-хуками — Sodium их всё равно вызывает. Конфиг `nhack.sodium.mixins.json` помечен `@Pseudo` и `required: false`,
-так что без Sodium он просто не применяется.
+> Старый `Xray` (SkyEgames → Testing, порт из Meteor Client, прятал весь мир кроме руды) вырезан из-за багов.
+> Падал он так: миксин в `ModelBlockRenderer` целился в `tesselate(BlockAndTintGetter, List, BlockState, BlockPos, ...)`,
+> которого в 1.21.11 больше нет — метод переименован в `tesselateBlock(...)`. Отсюда `InjectionError ... Scanned 0 target(s)`
+> при старте игры и костыль с `defaultRequire: 0`. Категория `SKYGAMES` с подвкладками осталась: если модуль
+> понадобится снова, его хуки надо писать под имена 1.21.11 (`tesselateBlock`, `Block.shouldRenderFace`,
+> `LiquidBlockRenderer.tesselate`, `SectionCompiler`, `VisGraph`, `Minecraft.useAmbientOcclusion`).
 
 Конфиг пишется в `.minecraft/config/nhack/client.json`.
 
@@ -88,7 +86,7 @@ Meteor гасит мир полупрозрачностью (`opacity`), nhack �
    (`COMBAT`, `MOVEMENT`, `MISC`, `TESTING`, `DETECTED`):
 
 ```java
-super("Xray", "What it does", Category.SKYGAMES, SubCategory.TESTING);
+super("MyModule", "What it does", Category.SKYGAMES, SubCategory.TESTING);
 ```
 
    Без `SubCategory` модуль показывается во всех подвкладках своей категории.
@@ -114,6 +112,15 @@ public final class MyModule extends Module {
 
 Для хуков, которых нет в Fabric API, клади mixin в `src/client/java/dev/nhack/client/mixin` и дописывай его в `src/client/resources/nhack.client.mixins.json`.
 
+`injectors.defaultRequire` держим **1**. Если таргет не найден (обычно после обновления MC метод переименовали),
+игра падает на старте с `InjectionError: Critical injection failure ... Scanned 0 target(s)`, и в логе сразу видно,
+какой миксин и какой метод потерялся. `0` — не починка, а маскировка: с ним ничего не падает, но сломанный хук
+тихо перестаёт работать (модуль «включён», а эффекта нет, и найти это в разы сложнее).
+
+Minecraft 1.21.11 распространяется **без обфускации**, поэтому Loom собирает jar со статически переименованными
+миксинами и без refmap: строка `No refMap loaded.` в отчёте об ошибке — норма, а не причина падения. Имена таргетов
+в миксинах — обычные Mojang-имена, их можно сверять с декомпилированными исходниками версии.
+
 Ивент-шина:
 
 ```java
@@ -134,8 +141,8 @@ src/client
   command/          .toggle .bind .help .prefix
   config/           JSON save/load
   gui/              ClickGUI (вкладки категорий + подвкладки SkyEgames)
-  mixin/            хуки: тик, свет, input, пакеты и xray-рендер
-  mixin/sodium/     те же xray-хуки для Sodium (применяются только с ним)
+  mixin/            хуки: тик, свет (Fullbright), input, пакеты, таймер, NoSlow
+  mixin/sodium/     зарезервировано под Sodium-хуки (папки пока нет, nhack.sodium.mixins.json пустой и required: false)
   util/             чат, цвет, клавиши
 ```
 

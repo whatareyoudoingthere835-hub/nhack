@@ -13,6 +13,7 @@ import dev.nhack.client.module.modules.movement.NoSlowModule;
 import dev.nhack.client.module.modules.movement.SprintModule;
 import dev.nhack.client.module.modules.movement.TimerModule;
 import dev.nhack.client.module.modules.render.EspModule;
+import dev.nhack.client.module.modules.render.ExposedDiamonds;
 import dev.nhack.client.module.modules.render.FullbrightModule;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
@@ -42,6 +43,7 @@ public final class ModuleManager {
 		register(new NoSlowModule());
 		register(new FullbrightModule());
 		register(new EspModule());
+		register(new ExposedDiamonds());
 		register(new ExampleModule());
 
 		MODULES.sort(Comparator.comparing(Module::getName, String.CASE_INSENSITIVE_ORDER));

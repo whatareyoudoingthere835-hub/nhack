@@ -13,6 +13,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -22,137 +23,195 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+/**
+ * «Иксрей» для алмазов: подсвечивает на 2D-экране только <b>открытую</b> алмазную руду
+ * (ту, что уже видна из пещеры / воздуха / воды — замурованная в камне игнорируется).
+ *
+ * <p>Сканирование разбито на чанки: один тик — один чанк, поэтому включённый модуль
+ * не просаживает TPS. Рендер идёт через {@link HudRenderEvent} (Fabric HUD-хук),
+ * сканирование — через {@link TickEvent.Pre}.
+ */
 public final class ExposedDiamonds extends Module {
+	/** Алмазная руда в ванили генерируется от bedrock и до Y=16. */
+	private static final int ORE_MAX_Y = 16;
 
-    private final NumberSetting radius = addSetting(new NumberSetting("Radius", "Радиус поиска в чанках", 3.0, 1.0, 6.0, 1.0));
-    private final ColorSetting diamondColor = addSetting(new ColorSetting("DiamondColor", "Цвет алмаза", 0xFF00FFFF));
+	private final NumberSetting radius = addSetting(new NumberSetting("Radius", "Радиус поиска в чанках", 3.0, 1.0, 6.0, 1.0));
+	private final NumberSetting maxY = addSetting(new NumberSetting("MaxY", "Верхняя граница поиска по Y", ORE_MAX_Y, -64.0, 320.0, 1.0));
+	private final ColorSetting diamondColor = addSetting(new ColorSetting("DiamondColor", "Цвет алмаза", 0xFF00BBFF));
 
-    // Потокобезопасный список для рендера
-    private final List<BlockPos> foundDiamonds = new CopyOnWriteArrayList<>();
-    private int scanIndex = 0;
+	/** Потокобезопасный список для рендера: скан и рендер идут в клиентском потоке, но список читают итератором. */
+	private final List<BlockPos> foundDiamonds = new CopyOnWriteArrayList<>();
+	private final List<int[]> chunkOffsets = new ArrayList<>();
 
-    public ExposedDiamonds() {
-        super("CaveXRay", "Подсвечивает открытые алмазы на 2D экране", Category.RENDER);
-    }
+	private int scanIndex;
+	private int cachedRadius = Integer.MIN_VALUE;
+	private String scannedDimension = "";
 
-    @Override
-    protected void onEnable() {
-        foundDiamonds.clear();
-        scanIndex = 0;
-    }
+	public ExposedDiamonds() {
+		super("CaveXRay", "Подсвечивает открытые алмазы на 2D экране", Category.RENDER);
+	}
 
-    @Override
-    protected void onDisable() {
-        foundDiamonds.clear();
-    }
+	@Override
+	protected void onEnable() {
+		foundDiamonds.clear();
+		scanIndex = 0;
+		cachedRadius = Integer.MIN_VALUE;
+		scannedDimension = "";
+	}
 
-    @Subscribe
-    public void onTick(TickEvent.Pre event) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.level == null) return;
+	@Override
+	protected void onDisable() {
+		foundDiamonds.clear();
+		scanIndex = 0;
+	}
 
-        int r = radius.getInt();
-        int playerChunkX = mc.player.getBlockX() >> 4;
-        int playerChunkZ = mc.player.getBlockZ() >> 4;
+	@Subscribe
+	public void onPreTick(TickEvent.Pre event) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null || mc.level == null) {
+			return;
+		}
 
-        List<int[]> chunkOffsets = getChunkOffsets(r);
-        if (scanIndex >= chunkOffsets.size()) {
-            scanIndex = 0;
-            foundDiamonds.removeIf(pos -> {
-                int cx = pos.getX() >> 4;
-                int cz = pos.getZ() >> 4;
-                return Math.abs(cx - playerChunkX) > r || Math.abs(cz - playerChunkZ) > r;
-            });
-        }
+		String dimension = mc.level.dimension().identifier().toString();
+		if (!dimension.equals(scannedDimension)) {
+			// Портал/телепорт: отметки из прошлого измерения уже бессмысленны.
+			scannedDimension = dimension;
+			foundDiamonds.clear();
+			scanIndex = 0;
+		}
 
-        int[] offset = chunkOffsets.get(scanIndex);
-        int targetX = playerChunkX + offset[0];
-        int targetZ = playerChunkZ + offset[1];
+		int r = radius.getInt();
+		if (r != cachedRadius) {
+			rebuildOffsets(r);
+			cachedRadius = r;
+			scanIndex = 0;
+		}
 
-        scanChunk(mc, targetX, targetZ);
-        scanIndex++;
-    }
+		int playerChunkX = mc.player.getBlockX() >> 4;
+		int playerChunkZ = mc.player.getBlockZ() >> 4;
 
-    @Subscribe
-    public void onRenderHud(HudRenderEvent event) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.level == null || mc.options.hideGui) return;
+		if (chunkOffsets.isEmpty()) {
+			return;
+		}
 
-        GuiGraphics graphics = event.graphics();
-        Font font = mc.font;
+		if (scanIndex >= chunkOffsets.size()) {
+			scanIndex = 0;
+			// Цикл по чанкам завершён — выбрасываем то, что ушло за радиус.
+			foundDiamonds.removeIf(pos -> {
+				int cx = pos.getX() >> 4;
+				int cz = pos.getZ() >> 4;
+				return Math.abs(cx - playerChunkX) > r || Math.abs(cz - playerChunkZ) > r;
+			});
+		}
 
-        for (BlockPos pos : foundDiamonds) {
-            // Проецируем центр блока на экран
-            float[] screen = WorldToScreen.project(Vec3.atCenterOf(pos));
-            if (screen == null) continue;
+		int[] offset = chunkOffsets.get(scanIndex);
+		scanIndex++;
+		scanChunk(mc, playerChunkX + offset[0], playerChunkZ + offset[1]);
+	}
 
-            int x = (int) screen[0];
-            int y = (int) screen[1];
+	@Override
+	public void onRenderHud(HudRenderEvent event) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null || mc.level == null || mc.options.hideGui || foundDiamonds.isEmpty()) {
+			return;
+		}
 
-            // Дистанция до алмаза
-            double dist = mc.player.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
-            String distText = String.format("%.0fm", Math.sqrt(dist));
+		GuiGraphics graphics = event.graphics();
+		Font font = mc.font;
+		int color = diamondColor.argb();
+		int boxColor = color & 0x66FFFFFF | 0x44000000;
 
-            // Рисуем квадрат и текст как в твоем ESP
-            graphics.fill(x - 4, y - 4, x + 4, y + 4, diamondColor.argb() & 0x66FFFFFF | 0x44000000);
-            graphics.fill(x - 1, y - 1, x + 1, y + 1, diamondColor.argb());
-            graphics.drawString(font, "DIAMOND", x - font.width("DIAMOND") / 2, y - 14, diamondColor.argb());
-            graphics.drawString(font, distText, x - font.width(distText) / 2, y + 6, 0xFFFFFFFF);
-        }
-    }
+		for (BlockPos pos : foundDiamonds) {
+			// Проецируем центр блока на экран; null — точка за спиной камеры.
+			float[] screen = WorldToScreen.project(Vec3.atCenterOf(pos));
+			if (screen == null) {
+				continue;
+			}
 
-    private void scanChunk(Minecraft mc, int chunkX, int chunkZ) {
-        if (!mc.level.hasChunk(chunkX, chunkZ)) return;
+			int x = (int) screen[0];
+			int y = (int) screen[1];
 
-        LevelChunk chunk = mc.level.getChunk(chunkX, chunkZ);
-        if (chunk.isEmpty()) return;
+			double dist = Math.sqrt(mc.player.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5));
+			String distText = String.format("%.0fm", dist);
 
-        int minX = chunkX << 4;
-        int minZ = chunkZ << 4;
-        int minY = -64;
-        int maxY = 16;
+			graphics.fill(x - 4, y - 4, x + 4, y + 4, boxColor);
+			graphics.fill(x - 1, y - 1, x + 1, y + 1, color);
+			graphics.drawString(font, "DIAMOND", x - font.width("DIAMOND") / 2, y - 14, color);
+			graphics.drawString(font, distText, x - font.width(distText) / 2, y + 6, 0xFFFFFFFF);
+		}
+	}
 
-        List<BlockPos> newFound = new ArrayList<>();
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        BlockPos.MutableBlockPos adjPos = new BlockPos.MutableBlockPos();
+	private void scanChunk(Minecraft mc, int chunkX, int chunkZ) {
+		Level level = mc.level;
+		if (!level.hasChunk(chunkX, chunkZ)) {
+			return;
+		}
 
-        for (int x = 0; x < 16; x++) {
-            for (int z = 0; z < 16; z++) {
-                for (int y = minY; y <= maxY; y++) {
-                    pos.set(minX + x, y, minZ + z);
-                    BlockState state = chunk.getBlockState(pos);
+		LevelChunk chunk = level.getChunk(chunkX, chunkZ);
+		if (chunk.isEmpty()) {
+			return;
+		}
 
-                    if (state != null && (state.is(Blocks.DIAMOND_ORE) || state.is(Blocks.DEEPSLATE_DIAMOND_ORE))) {
-                        if (isExposed(mc, pos, adjPos)) {
-                            newFound.add(pos.immutable());
-                        }
-                    }
-                }
-            }
-        }
+		int minX = chunkX << 4;
+		int minZ = chunkZ << 4;
+		// Нижняя граница — дно мира (в Незере/Энде это 0), верхняя — настройка, но не выше потолка мира.
+		int minY = level.getMinY();
+		int topY = Math.min(level.getMaxY(), maxY.getInt());
 
-        foundDiamonds.removeIf(p -> (p.getX() >> 4) == chunkX && (p.getZ() >> 4) == chunkZ);
-        foundDiamonds.addAll(newFound);
-    }
+		if (topY < minY) {
+			return;
+		}
 
-    private boolean isExposed(Minecraft mc, BlockPos pos, BlockPos.MutableBlockPos adjPos) {
-        for (Direction dir : Direction.values()) {
-            adjPos.setWithOffset(pos, dir);
-            BlockState adjState = mc.level.getBlockState(adjPos);
-            if (adjState != null && (adjState.isAir() || !adjState.getFluidState().isEmpty() || !adjState.isSolidRender())) {
-                return true;
-            }
-        }
-        return false;
-    }
+		List<BlockPos> newFound = new ArrayList<>();
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		BlockPos.MutableBlockPos adjPos = new BlockPos.MutableBlockPos();
 
-    private List<int[]> getChunkOffsets(int radius) {
-        List<int[]> offsets = new ArrayList<>();
-        for (int x = -radius; x <= radius; x++) {
-            for (int z = -radius; z <= radius; z++) {
-                offsets.add(new int[]{x, z});
-            }
-        }
-        return offsets;
-    }
+		for (int x = 0; x < 16; x++) {
+			for (int z = 0; z < 16; z++) {
+				for (int y = minY; y <= topY; y++) {
+					pos.set(minX + x, y, minZ + z);
+					BlockState state = chunk.getBlockState(pos);
+
+					if (state != null && (state.is(Blocks.DIAMOND_ORE) || state.is(Blocks.DEEPSLATE_DIAMOND_ORE))) {
+						if (isExposed(level, pos, adjPos)) {
+							newFound.add(pos.immutable());
+						}
+					}
+				}
+			}
+		}
+
+		// Чанк пересканирован — старые отметки из него заменяем свежими.
+		foundDiamonds.removeIf(p -> (p.getX() >> 4) == chunkX && (p.getZ() >> 4) == chunkZ);
+		foundDiamonds.addAll(newFound);
+	}
+
+	/** Руда считается открытой, если хотя бы одна соседняя клетка — воздух, жидкость или не сплошной блок. */
+	private boolean isExposed(Level level, BlockPos pos, BlockPos.MutableBlockPos adjPos) {
+		for (Direction dir : Direction.values()) {
+			adjPos.setWithOffset(pos, dir);
+			if (!level.isInsideBuildHeight(adjPos.getY())) {
+				// Сосед за границей мира (например, ниже bedrock) — это не «открытость».
+				continue;
+			}
+
+			BlockState adjState = level.getBlockState(adjPos);
+			if (adjState == null) {
+				continue;
+			}
+			if (adjState.isAir() || !adjState.getFluidState().isEmpty() || !adjState.isSolidRender()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void rebuildOffsets(int radius) {
+		chunkOffsets.clear();
+		for (int x = -radius; x <= radius; x++) {
+			for (int z = -radius; z <= radius; z++) {
+				chunkOffsets.add(new int[]{x, z});
+			}
+		}
+	}
 }
