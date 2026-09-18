@@ -28,7 +28,12 @@ public class LocalPlayerMixin {
 
 	@Inject(method = "sendPosition", at = @At("TAIL"))
 	private void nhack$restoreVisualRotation(CallbackInfo ci) {
-		if (!RotationUtil.active || RotationUtil.clientLook) {
+		if (!RotationUtil.active) {
+			return;
+		}
+		// Пакет уже ушёл — запоминаем, какой поворот теперь знает сервер.
+		RotationUtil.markSent();
+		if (RotationUtil.clientLook) {
 			return;
 		}
 		LocalPlayer player = (LocalPlayer) (Object) this;

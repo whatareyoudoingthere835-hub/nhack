@@ -10,7 +10,8 @@
 		"ClientCommonPacketListenerImplMixin",
 		"ConnectionMixin",
 		"DeltaTrackerTimerMixin",
-		"EntityMixin"
+		"EntityMixin",
+		"GameRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

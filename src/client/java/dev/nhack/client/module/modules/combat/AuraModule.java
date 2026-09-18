@@ -3,6 +3,7 @@ package dev.nhack.client.module.modules.combat;
 import dev.nhack.client.event.Subscribe;
 import dev.nhack.client.event.events.HudRenderEvent;
 import dev.nhack.client.event.events.PacketSendEvent;
+import dev.nhack.client.event.events.RenderEvent;
 import dev.nhack.client.event.events.TickEvent;
 import dev.nhack.client.module.Category;
 import dev.nhack.client.module.Module;
@@ -58,7 +59,8 @@ public final class AuraModule extends Module {
 
 	private final ModeSetting rotationMode = addSetting(new ModeSetting("RotationMode", "How aim is applied", "Track", "Interact", "Track", "None"));
 	private final NumberSetting interactTicks = addSetting(new NumberSetting("InteractTicks", "Ticks to hold aim in Interact mode", 3, 1, 10, 1));
-	private final NumberSetting rotationSpeed = addSetting(new NumberSetting("RotationSpeed", "Track mode step", 10, 1, 20, 0.5));
+	private final NumberSetting rotationSpeed = addSetting(new NumberSetting("RotationSpeed", "Aim speed, degrees per tick", 12, 1, 40, 0.5));
+	private final NumberSetting aimJitter = addSetting(new NumberSetting("AimJitter", "Random aim speed variance, %", 12, 0, 50, 1));
 	private final BoolSetting clientLook = addSetting(new BoolSetting("ClientLook", "Also turn the camera toward the target", false));
 
 	private final ModeSetting switchMode = addSetting(new ModeSetting("AutoWeapon", "Swap to a weapon before hitting", "None", "Normal", "None", "Silent"));
@@ -71,6 +73,7 @@ public final class AuraModule extends Module {
 	private final BoolSetting shieldBreaker = addSetting(new BoolSetting("ShieldBreaker", "Swap to an axe against shields", true));
 	private final BoolSetting pauseWhileEating = addSetting(new BoolSetting("PauseWhileEating", "Pause while using an item", false));
 	private final NumberSetting attackDelay = addSetting(new NumberSetting("AttackDelay", "Ticks between hits", 10, 1, 20, 1));
+	private final NumberSetting delayJitter = addSetting(new NumberSetting("DelayJitter", "Random +/- ticks added to AttackDelay", 1, 0, 5, 1));
 	private final ModeSetting rayTrace = addSetting(new ModeSetting("RayTrace", "Hitbox / wall check", "OnlyTarget", "OFF", "OnlyTarget", "AllEntities"));
 	private final BoolSetting showEsp = addSetting(new BoolSetting("ESP", "Draw the current target on the HUD", true));
 
@@ -97,6 +100,8 @@ public final class AuraModule extends Module {
 
 	private Vec3 rotationPoint = Vec3.ZERO;
 	private Vec3 rotationMotion = Vec3.ZERO;
+	private Entity aimTarget;
+	private boolean aiming;
 
 	private int hitTicks;
 	private int trackTicks;
@@ -113,10 +118,13 @@ public final class AuraModule extends Module {
 	protected void onEnable() {
 		Minecraft mc = Minecraft.getInstance();
 		target = null;
+		aimTarget = null;
+		aiming = false;
 		lookingAtHitbox = false;
 		readyForAttack = false;
 		rotationPoint = Vec3.ZERO;
 		rotationMotion = Vec3.ZERO;
+		trackTicks = 0;
 		if (mc.player != null) {
 			rotationYaw = mc.player.getYRot();
 			rotationPitch = mc.player.getXRot();
@@ -127,7 +135,10 @@ public final class AuraModule extends Module {
 	@Override
 	protected void onDisable() {
 		target = null;
+		aimTarget = null;
+		aiming = false;
 		readyForAttack = false;
+		trackTicks = 0;
 		RotationUtil.clear();
 	}
 
@@ -135,76 +146,144 @@ public final class AuraModule extends Module {
 		pauseTimer.reset();
 	}
 
+	/**
+	 * Всё боевое происходит здесь — до {@code Minecraft.tick()}.
+	 *
+	 * <p>Порядок пакетов ванили внутри одного тика: {@code handleKeybinds()} (удар, взмах, смена
+	 * слота) и только потом {@code LocalPlayer.sendPosition()} (пакет движения). Post-проверка
+	 * Grim/Polar ловит любой боевой пакет, ушедший <b>после</b> пакета движения, — вот почему удар
+	 * отправляется в Pre, а не в Post.
+	 *
+	 * <p>По этой же причине «смотрим ли мы в цель» проверяется по {@link RotationUtil#sentYaw} —
+	 * повороту, который сервер уже получил в прошлом тике. Сервер валидирует удар именно им, так
+	 * что удар всегда выходит на уже отправленной наводке, а не на той, что доедет позже.
+	 */
 	@Subscribe
 	public void onPreTick(TickEvent.Pre event) {
 		Minecraft mc = Minecraft.getInstance();
 		LocalPlayer player = mc.player;
-		if (player == null || mc.level == null || mc.gameMode == null) {
+		aiming = false;
+		readyForAttack = false;
+		hitTicks = Math.max(0, hitTicks - 1);
+
+		if (player == null || mc.level == null || mc.gameMode == null || mc.screen != null || mc.isPaused()) {
+			target = null;
 			RotationUtil.clear();
 			return;
 		}
-		if (!pauseTimer.passedMs(1000)) {
-			RotationUtil.clear();
-			return;
-		}
-		if (player.isUsingItem() && pauseWhileEating.get()) {
+		if (!pauseTimer.passedMs(1000) || (player.isUsingItem() && pauseWhileEating.get()) || !haveWeapon(player)) {
+			if (!haveWeapon(player)) {
+				target = null;
+			}
 			RotationUtil.clear();
 			return;
 		}
 
 		RotationUtil.captureVisual(player);
-		readyForAttack = false;
-
-		if (!haveWeapon(player)) {
-			target = null;
-			RotationUtil.clear();
-			hitTicks = Math.max(0, hitTicks - 1);
-			return;
-		}
-
 		updateTarget(mc, player);
 
 		if (target == null) {
+			aimTarget = null;
 			RotationUtil.clear();
-			rotationYaw = player.getYRot();
-			rotationPitch = player.getXRot();
-			hitTicks = Math.max(0, hitTicks - 1);
 			return;
 		}
 
-		if (!mc.options.keyJump.isDown() && player.onGround() && autoJump.get()) {
+		if (aimTarget != target) {
+			// новая цель: точка прицела стартует заново, иначе прицел «приедет» со старой
+			aimTarget = target;
+			rotationPoint = Vec3.ZERO;
+			rotationMotion = Vec3.ZERO;
+			trackTicks = 0;
+		}
+		advanceAimPoint(player, target);
+
+		boolean critReady = autoCrit(mc, player);
+		if (critReady && autoJump.get() && player.onGround() && !mc.options.keyJump.isDown()) {
 			player.jumpFromGround();
 		}
 
-		boolean critReady = autoCrit(mc, player);
-		calcRotations(player, critReady);
-		readyForAttack = critReady && (lookingAtHitbox || skipRayTraceCheck(mc, player));
-		hitTicks = Math.max(0, hitTicks - 1);
+		if (rotationMode.is("Interact")) {
+			// наводка живёт только в коротком окне вокруг удара
+			if (critReady && hitTicks <= interactTicks.getInt()) {
+				trackTicks = interactTicks.getInt();
+			} else if (trackTicks > 0) {
+				trackTicks--;
+			}
+		}
+
+		aiming = !rotationMode.is("None") && (!rotationMode.is("Interact") || trackTicks > 0);
+		if (!aiming) {
+			RotationUtil.clear();
+		}
+
+		float checkYaw = aiming ? RotationUtil.sentYaw : player.getYRot();
+		float checkPitch = aiming ? RotationUtil.sentPitch : player.getXRot();
+		lookingAtHitbox = RotationUtil.checkRtx(
+			player,
+			target,
+			checkYaw,
+			checkPitch,
+			attackRange.getFloat(),
+			wallRange.getFloat(),
+			!rayTrace.is("OFF")
+		);
+		readyForAttack = critReady && hitTicks <= 0 && (lookingAtHitbox || skipRayTraceCheck(mc, player));
+
+		if (readyForAttack && !blockedByShield(mc, player)) {
+			attack(mc, player);
+		}
 	}
 
+	/**
+	 * Наводка на кадровой частоте: 60–240 обновлений в секунду вместо 20 тиковых. Именно это
+	 * убирает рывки — раньше поворот менялся один раз за тик, и камера догоняла цель ступеньками.
+	 *
+	 * <p>Скорость задаётся в градусах за тик и умножается на {@link RenderEvent#deltaTime()},
+	 * поэтому наводка одинаковая и на 30, и на 300 FPS.
+	 */
 	@Subscribe
-	public void onPostTick(TickEvent.Post event) {
+	public void onRender(RenderEvent event) {
+		if (!aiming) {
+			return;
+		}
+
 		Minecraft mc = Minecraft.getInstance();
 		LocalPlayer player = mc.player;
-		if (player == null || mc.level == null || mc.gameMode == null || target == null || !readyForAttack) {
-			return;
-		}
-		if (!pauseTimer.passedMs(1000) || (player.isUsingItem() && pauseWhileEating.get()) || !haveWeapon(player)) {
+		Entity entity = target;
+		if (player == null || mc.level == null || entity == null || !entity.isAlive()
+			|| mc.screen != null || mc.isPaused()) {
 			return;
 		}
 
+		float partial = Mth.clamp(event.partialTick(), 0.0F, 1.0F);
+		Vec3 aim = RotationUtil.lerp(entity, partial).add(rotationPoint);
+		float[] dest = RotationUtil.angles(player.getEyePosition(partial), aim);
+
+		float speed = rotationSpeed.getFloat() * (rotationMode.is("Track") ? 1.0F : 3.0F);
+		float variance = aimJitter.getFloat() / 100.0F;
+		if (variance > 0.0F) {
+			speed *= 1.0F + MathUtil.random(-variance, variance);
+		}
+
+		RotationUtil.smooth(dest[0], dest[1], speed, event.deltaTime(), clientLook.get());
+		rotationYaw = RotationUtil.yaw;
+		rotationPitch = RotationUtil.pitch;
+
+		if (clientLook.get()) {
+			player.setYRot(rotationYaw);
+			player.setXRot(rotationPitch);
+		}
+	}
+
+	/** Цель в щите: либо ломаем щит топором (и уже ударили), либо не бьём вовсе. */
+	private boolean blockedByShield(Minecraft mc, LocalPlayer player) {
 		if (shieldBreaker(mc, player, false)) {
-			return;
+			return true;
 		}
-
-		if (target instanceof Player victim
+		return target instanceof Player victim
 			&& victim.isUsingItem()
 			&& (victim.getOffhandItem().is(Items.SHIELD) || victim.getMainHandItem().is(Items.SHIELD))
-			&& !ignoreShield.get()) {
-			return;
-		}
-
-		attack(mc, player);
+			&& !ignoreShield.get();
 	}
 
 	@Subscribe
@@ -248,11 +327,24 @@ public final class AuraModule extends Module {
 		} finally {
 			sendingAttack = false;
 		}
-		hitTicks = attackDelay.getInt();
+		hitTicks = nextDelay();
 		if (previous != -1) {
 			player.getInventory().setSelectedSlot(previous);
 			player.connection.send(new ServerboundSetCarriedItemPacket(previous));
 		}
+	}
+
+	/**
+	 * Пауза между ударами с разбросом: идеально ровный интервал — самый простой признак
+	 * автокликера, живые игроки так не жмут.
+	 */
+	private int nextDelay() {
+		int delay = attackDelay.getInt();
+		int jitter = delayJitter.getInt();
+		if (jitter > 0) {
+			delay += (int) MathUtil.random(-jitter, jitter + 1.0F);
+		}
+		return Math.max(1, delay);
 	}
 
 	private int switchMethod(Minecraft mc, LocalPlayer player) {
@@ -364,7 +456,7 @@ public final class AuraModule extends Module {
 			}
 			player.connection.send(new ServerboundSetCarriedItemPacket(selected));
 		}
-		hitTicks = 10;
+		hitTicks = nextDelay();
 		return true;
 	}
 
@@ -393,74 +485,22 @@ public final class AuraModule extends Module {
 		}
 	}
 
-	private void calcRotations(LocalPlayer player, boolean ready) {
-		Minecraft mc = Minecraft.getInstance();
-		if (ready) {
-			trackTicks = headBlocked(mc, player) ? 1 : interactTicks.getInt();
-		} else if (trackTicks > 0) {
-			trackTicks--;
-		}
-
-		if (target == null) {
+	/**
+	 * Точка прицела внутри хитбокса пересчитывается один раз в тик — кадры дальше просто
+	 * интерполируют от неё, поэтому «дыхание» прицела не зависит от FPS.
+	 */
+	private void advanceAimPoint(LocalPlayer player, Entity entity) {
+		if (player.isFallFlying()) {
+			// на элитрах цель не «стоит» на земле — держим прицел на её глазах
+			rotationPoint = entity.getEyePosition().subtract(entity.position());
+			rotationMotion = Vec3.ZERO;
 			return;
 		}
-
-		Vec3 aim = player.isFallFlying() ? target.getEyePosition() : getLegitLook(target);
-		if (aim == null) {
-			return;
-		}
-
-		float[] dest = RotationUtil.angles(player.getEyePosition(), aim);
-		float deltaYaw = Mth.wrapDegrees(dest[0] - rotationYaw);
-		float deltaPitch = dest[1] - rotationPitch;
-
-		float yawStep;
-		float pitchStep;
-		if (!rotationMode.is("Track")) {
-			yawStep = 360.0F;
-			pitchStep = 180.0F;
-		} else {
-			float progress = Mth.clamp(Math.abs(deltaYaw) / 180.0F, 0.0F, 1.0F);
-			float speed = rotationSpeed.getFloat();
-			yawStep = Mth.lerp(progress, speed * 4.0F, speed * 8.0F);
-			pitchStep = speed;
-		}
-
-		float stepYaw = Mth.clamp(deltaYaw, -yawStep, yawStep);
-		float stepPitch = Mth.clamp(deltaPitch, -pitchStep, pitchStep);
-		float newYaw = rotationYaw + stepYaw;
-		float newPitch = Mth.clamp(rotationPitch + stepPitch, -90.0F, 90.0F);
-
-		if (trackTicks > 0 || rotationMode.is("Track")) {
-			rotationYaw = newYaw;
-			rotationPitch = newPitch;
-		} else {
-			rotationYaw = player.getYRot();
-			rotationPitch = player.getXRot();
-		}
-
-		if (!rotationMode.is("None")) {
-			RotationUtil.set(rotationYaw, rotationPitch, clientLook.get());
-			if (clientLook.get()) {
-				player.setYRot(rotationYaw);
-				player.setXRot(rotationPitch);
-			}
-		} else {
-			RotationUtil.clear();
-		}
-
-		lookingAtHitbox = RotationUtil.checkRtx(
-			player,
-			target,
-			rotationYaw,
-			rotationPitch,
-			attackRange.getFloat(),
-			wallRange.getFloat(),
-			!rayTrace.is("OFF")
-		);
+		wanderAimPoint(entity);
 	}
 
-	private Vec3 getLegitLook(Entity entity) {
+	/** Медленно водит точку прицела по хитбоксу, чтобы наводка не висела в одной точке пиксель в пиксель. */
+	private void wanderAimPoint(Entity entity) {
 		double lengthX = entity.getBoundingBox().getXsize();
 		double lengthY = entity.getBoundingBox().getYsize();
 		double lengthZ = entity.getBoundingBox().getZsize();
@@ -489,8 +529,6 @@ public final class AuraModule extends Module {
 		if (rotationPoint.z <= -(lengthZ - 0.05) / 2.0) {
 			rotationMotion = new Vec3(rotationMotion.x, rotationMotion.y, MathUtil.random(0.001F, 0.008F));
 		}
-
-		return entity.position().add(rotationPoint);
 	}
 
 	private boolean isInRange(LocalPlayer player, Entity entity) {

@@ -1,5 +1,6 @@
 package dev.nhack.client.util;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -17,6 +18,13 @@ public final class RotationUtil {
 	public static float visualYaw;
 	public static float visualPitch;
 
+	/**
+	 * Поворот, который сервер реально получил последним пакетом движения. Боевые проверки
+	 * античита смотрят именно на него, а не на то, что клиент нарисовал себе в этом тике.
+	 */
+	public static float sentYaw;
+	public static float sentPitch;
+
 	private RotationUtil() {
 	}
 
@@ -25,15 +33,123 @@ public final class RotationUtil {
 		visualPitch = player.getXRot();
 	}
 
+	/** Ставит поворот сразу (с точностью до шага мыши). Для плавной наводки есть {@link #smooth}. */
 	public static void set(float nextYaw, float nextPitch, boolean look) {
-		active = true;
+		Minecraft mc = Minecraft.getInstance();
+		LocalPlayer player = mc.player;
+		if (player == null) {
+			active = false;
+			return;
+		}
+
+		engage(player);
 		clientLook = look;
-		yaw = nextYaw;
-		pitch = Mth.clamp(nextPitch, -90.0F, 90.0F);
+		yaw += quantize(Mth.wrapDegrees(nextYaw - yaw), mc);
+		pitch = Mth.clamp(pitch + quantize(nextPitch - pitch, mc), -90.0F, 90.0F);
+	}
+
+	/**
+	 * Плавная наводка: за кадр проходится не больше {@code maxDegreesPerTick * dtTicks} градусов,
+	 * с замедлением у цели и случайным разбросом, поэтому движение не выглядит линейным.
+	 * Каждый шаг приводится к сетке мыши — сервер видит «честные» дельты.
+	 *
+	 * @param maxDegreesPerTick скорость наводки в градусах за игровой тик
+	 * @param dtTicks           сколько тиков времени прошло с прошлого кадра
+	 */
+	public static void smooth(float targetYaw, float targetPitch, float maxDegreesPerTick, float dtTicks, boolean look) {
+		Minecraft mc = Minecraft.getInstance();
+		LocalPlayer player = mc.player;
+		if (player == null) {
+			active = false;
+			return;
+		}
+
+		engage(player);
+		clientLook = look;
+
+		float dt = Mth.clamp(dtTicks, 0.0F, 4.0F);
+		if (dt <= 0.0F) {
+			return;
+		}
+
+		float budget = Math.max(0.05F, maxDegreesPerTick) * dt;
+		float deltaYaw = Mth.wrapDegrees(targetYaw - yaw);
+		float deltaPitch = Mth.clamp(targetPitch, -90.0F, 90.0F) - pitch;
+
+		yaw += quantize(ease(deltaYaw, budget), mc);
+		pitch = Mth.clamp(pitch + quantize(ease(deltaPitch, budget), mc), -90.0F, 90.0F);
+	}
+
+	/** Обрезает шаг бюджетом и замедляет его у цели (ease-out), чтобы не было равномерного «робота». */
+	private static float ease(float delta, float budget) {
+		if (delta == 0.0F) {
+			return 0.0F;
+		}
+		float limited = Mth.clamp(delta, -budget, budget);
+		float progress = Mth.clamp(Math.abs(delta) / (budget * 2.5F), 0.0F, 1.0F);
+		return limited * (0.5F + 0.5F * progress);
+	}
+
+	/**
+	 * Первый вызов после {@link #clear()}: стартуем от реального взгляда игрока и идём к цели
+	 * постепенно. Без этого сервер увидел бы мгновенный доворот на цель в одном пакете.
+	 */
+	private static void engage(LocalPlayer player) {
+		if (active) {
+			return;
+		}
+		active = true;
+		yaw = player.getYRot();
+		pitch = player.getXRot();
+		sentYaw = yaw;
+		sentPitch = pitch;
 	}
 
 	public static void clear() {
 		active = false;
+	}
+
+	/** Фиксирует, что именно ушло на сервер в этом тике. Вызывается из миксина {@code sendPosition}. */
+	public static void markSent() {
+		sentYaw = yaw;
+		sentPitch = pitch;
+	}
+
+	/**
+	 * Множитель чувствительности мыши из ванильного {@code MouseHandler.turnPlayer}:
+	 * {@code (sensitivity * 0.6 + 0.2)^3 * 8}, а с подзорной трубой в первом лице — без восьмёрки.
+	 */
+	public static double sensitivityScale(Minecraft mc) {
+		// OptionInstance<Double>, но читаем через Number — так не зависит от того,
+		// как именно объявлена опция в текущих маппингах.
+		Object raw = mc.options.sensitivity().get();
+		double value = raw instanceof Number number ? number.doubleValue() : 0.5;
+		double factor = value * 0.6 + 0.2;
+		double cubed = factor * factor * factor;
+		LocalPlayer player = mc.player;
+		if (player != null && player.isScoping() && mc.options.getCameraType().isFirstPerson()) {
+			return cubed;
+		}
+		return cubed * 8.0;
+	}
+
+	/**
+	 * Приводит дельту поворота к сетке мыши: {@code (float)(counts * sens) * 0.15F} — ровно та
+	 * арифметика, что в {@code Entity.turn}. Grim и Polar считают GCD дельт поворота и ждут
+	 * кратности этому шагу; произвольные float из {@code atan2} ловятся за пару секунд боя.
+	 */
+	public static float quantize(float delta, Minecraft mc) {
+		double sens = sensitivityScale(mc);
+		if (!(sens > 1.0E-4)) {
+			return delta;
+		}
+		double counts = Math.round(delta / (sens * 0.15));
+		return (float) (counts * sens) * 0.15F;
+	}
+
+	/** Шаг мыши в градусах — насколько «грубой» получается наводка при текущей чувствительности. */
+	public static float sensitivityUnit(Minecraft mc) {
+		return (float) (sensitivityScale(mc) * 0.15);
 	}
 
 	public static float[] angles(Vec3 from, Vec3 to) {
@@ -104,5 +220,13 @@ public final class RotationUtil {
 			}
 		}
 		return squaredDistanceFromEyes(player, target.getEyePosition()) <= wallRange * wallRange;
+	}
+
+	public static Vec3 lerp(Entity entity, float partialTick) {
+		return new Vec3(
+			entity.xo + (entity.getX() - entity.xo) * partialTick,
+			entity.yo + (entity.getY() - entity.yo) * partialTick,
+			entity.zo + (entity.getZ() - entity.zo) * partialTick
+		);
 	}
 }

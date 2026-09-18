@@ -20,6 +20,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -35,7 +36,7 @@ public final class ExposedDiamonds extends Module {
 	/** Алмазная руда в ванили генерируется от bedrock и до Y=16. */
 	private static final int ORE_MAX_Y = 16;
 
-	private final NumberSetting radius = addSetting(new NumberSetting("Radius", "Радиус поиска в чанках", 3.0, 1.0, 6.0, 1.0));
+	private final NumberSetting radius = addSetting(new NumberSetting("Radius", "Радиус поиска в чанках, ближние сканируются первыми", 3.0, 1.0, 6.0, 1.0));
 	private final NumberSetting maxY = addSetting(new NumberSetting("MaxY", "Верхняя граница поиска по Y", ORE_MAX_Y, -64.0, 320.0, 1.0));
 	private final ColorSetting diamondColor = addSetting(new ColorSetting("DiamondColor", "Цвет алмаза", 0xFF00BBFF));
 
@@ -45,6 +46,8 @@ public final class ExposedDiamonds extends Module {
 
 	private int scanIndex;
 	private int cachedRadius = Integer.MIN_VALUE;
+	private int lastChunkX = Integer.MIN_VALUE;
+	private int lastChunkZ = Integer.MIN_VALUE;
 	private String scannedDimension = "";
 
 	public ExposedDiamonds() {
@@ -56,6 +59,8 @@ public final class ExposedDiamonds extends Module {
 		foundDiamonds.clear();
 		scanIndex = 0;
 		cachedRadius = Integer.MIN_VALUE;
+		lastChunkX = Integer.MIN_VALUE;
+		lastChunkZ = Integer.MIN_VALUE;
 		scannedDimension = "";
 	}
 
@@ -63,6 +68,8 @@ public final class ExposedDiamonds extends Module {
 	protected void onDisable() {
 		foundDiamonds.clear();
 		scanIndex = 0;
+		lastChunkX = Integer.MIN_VALUE;
+		lastChunkZ = Integer.MIN_VALUE;
 	}
 
 	@Subscribe
@@ -78,6 +85,8 @@ public final class ExposedDiamonds extends Module {
 			scannedDimension = dimension;
 			foundDiamonds.clear();
 			scanIndex = 0;
+			lastChunkX = Integer.MIN_VALUE;
+			lastChunkZ = Integer.MIN_VALUE;
 		}
 
 		int r = radius.getInt();
@@ -94,14 +103,19 @@ public final class ExposedDiamonds extends Module {
 			return;
 		}
 
+		if (playerChunkX != lastChunkX || playerChunkZ != lastChunkZ) {
+			// Ушли в другой чанк: список оффсетов отсортирован по расстоянию, поэтому перезапуск
+			// прохода снова ставит в начало чанки под ногами, а не те, что были впереди на старте.
+			lastChunkX = playerChunkX;
+			lastChunkZ = playerChunkZ;
+			scanIndex = 0;
+			pruneOutOfRange(playerChunkX, playerChunkZ, r);
+		}
+
 		if (scanIndex >= chunkOffsets.size()) {
 			scanIndex = 0;
 			// Цикл по чанкам завершён — выбрасываем то, что ушло за радиус.
-			foundDiamonds.removeIf(pos -> {
-				int cx = pos.getX() >> 4;
-				int cz = pos.getZ() >> 4;
-				return Math.abs(cx - playerChunkX) > r || Math.abs(cz - playerChunkZ) > r;
-			});
+			pruneOutOfRange(playerChunkX, playerChunkZ, r);
 		}
 
 		int[] offset = chunkOffsets.get(scanIndex);
@@ -206,6 +220,11 @@ public final class ExposedDiamonds extends Module {
 		return false;
 	}
 
+	/**
+	 * Список чанков вокруг игрока, отсортированный по расстоянию: центр первым, углы последними.
+	 * При проходе по одному чанку за тик это значит, что алмазы под ногами подсвечиваются сразу,
+	 * а периферия дорисовывается следом.
+	 */
 	private void rebuildOffsets(int radius) {
 		chunkOffsets.clear();
 		for (int x = -radius; x <= radius; x++) {
@@ -213,5 +232,15 @@ public final class ExposedDiamonds extends Module {
 				chunkOffsets.add(new int[]{x, z});
 			}
 		}
+		// Сортировка устойчивая, поэтому на одинаковом удалении порядок остаётся предсказуемым.
+		chunkOffsets.sort(Comparator.comparingInt(offset -> offset[0] * offset[0] + offset[1] * offset[1]));
+	}
+
+	private void pruneOutOfRange(int playerChunkX, int playerChunkZ, int radius) {
+		foundDiamonds.removeIf(pos -> {
+			int cx = pos.getX() >> 4;
+			int cz = pos.getZ() >> 4;
+			return Math.abs(cx - playerChunkX) > radius || Math.abs(cz - playerChunkZ) > radius;
+		});
 	}
 }
