@@ -45,6 +45,7 @@ import net.minecraft.world.phys.Vec3;
  * ровно как в {@code MouseHandler.turnPlayer} + {@code Entity.turn}.
  */
 public final class KillAuraModule extends Module {
+	private final ModeSetting profile = addSetting(new ModeSetting("Profile", "Профиль боя под античит сервера", "Human", "Legacy", "Human", "Assist"));
 	private final ModeSetting rotationMode = addSetting(new ModeSetting("Rotation", "Тип наведения под античиты", "Sloth/Polar", "Sloth/Polar", "Fantime"));
 	private final ModeSetting targets = addSetting(new ModeSetting("Targets", "Кого бьем", "Players", "Players", "All", "Mobs"));
 	private final NumberSetting range = addSetting(new NumberSetting("Range", "Дистанция", 3.0, 2.5, 6.0, 0.1));
@@ -56,18 +57,26 @@ public final class KillAuraModule extends Module {
 	private final BoolSetting smartSprint = addSetting(new BoolSetting("SmartSprint", "Сброс спринта для обхода Polar", true));
 	private final BoolSetting silent = addSetting(new BoolSetting("Silent", "Вращение только на сервере", true));
 	private final BoolSetting raytrace = addSetting(new BoolSetting("Raytrace", "Строгий чек хитбокса (Polar Safe)", true));
+	private final NumberSetting assistFov = addSetting(new NumberSetting("AssistFov", "Assist: максимум градусов между твоим взглядом и целью, иначе аура не подтверждает клик", 30.0, 5.0, 90.0, 1.0));
 
 	private LivingEntity target;
 	private Vec3 aimOffset = Vec3.ZERO;
 	private int aimRefresh;
 	private boolean aiming;
 	private boolean sprintReset;
+	/** Human: тики реакции после включения/смены цели — поворот ещё не начат, как у человека. */
+	private int reaction;
+	/** Human: пауза между ударами, чтобы CPS не был метрономом. */
+	private int strikePause;
+	/** Human: медленное случайное блуждание остаточного промаха наводки, градусы. */
+	private float noiseYaw;
+	private float noisePitch;
 
 	public float rotationYaw;
 	public float rotationPitch;
 
 	public KillAuraModule() {
-		super("KillAura", "Универсальная киллаура с байпасом Sloth и Polar и говна в чайнике", Category.COMBAT);
+		super("KillAura", "Киллаура с профилями: Legacy (Sloth/Polar/Fantime), Human (хуманизированный фулл-авто), Assist (полу-легит, подтверждает твой клик)", Category.COMBAT);
 	}
 
 	@Override
@@ -84,6 +93,10 @@ public final class KillAuraModule extends Module {
 		sprintReset = false;
 		aimRefresh = 0;
 		aimOffset = Vec3.ZERO;
+		reaction = 0;
+		strikePause = 0;
+		noiseYaw = 0.0F;
+		noisePitch = 0.0F;
 		if (mc.player != null) {
 			rotationYaw = mc.player.getYRot();
 			rotationPitch = mc.player.getXRot();
@@ -96,6 +109,10 @@ public final class KillAuraModule extends Module {
 		target = null;
 		aiming = false;
 		sprintReset = false;
+		reaction = 0;
+		strikePause = 0;
+		noiseYaw = 0.0F;
+		noisePitch = 0.0F;
 		CombatUtil.clearSprintDrop();
 		RotationUtil.clear();
 	}
@@ -120,10 +137,16 @@ public final class KillAuraModule extends Module {
 		// в момент включения модуля (старая версия ловила его только в onEnable).
 		RotationUtil.captureVisual(player);
 
+		if (profile.is("Assist")) {
+			assistTick(mc, player);
+			return;
+		}
+
 		LivingEntity previous = target;
 		updateTarget(mc, player);
 		if (target == null) {
 			RotationUtil.clear();
+			reaction = 0;
 			return;
 		}
 
@@ -132,6 +155,21 @@ public final class KillAuraModule extends Module {
 			aimOffset = Vec3.ZERO;
 			aimRefresh = 0;
 			sprintReset = false;
+			// человек не разворачивается мгновенно: 3-6 тиков «реакции» без наводки
+			reaction = profile.is("Human") ? 3 + (int) MathUtil.random(0.0F, 4.0F) : 0;
+		}
+
+		if (reaction > 0) {
+			reaction--;
+			aiming = false;
+			RotationUtil.clear();
+			return;
+		}
+
+		// Остаточный промах живого прицела: медленное случайное блуждание вокруг цели.
+		if (profile.is("Human")) {
+			noiseYaw = Mth.clamp(noiseYaw * 0.9F + MathUtil.random(-0.45F, 0.45F), -1.5F, 1.5F);
+			noisePitch = Mth.clamp(noisePitch * 0.9F + MathUtil.random(-0.35F, 0.35F), -1.0F, 1.0F);
 		}
 
 		aiming = true;
@@ -148,6 +186,12 @@ public final class KillAuraModule extends Module {
 			return;
 		}
 
+		if (profile.is("Human") && strikePause > 0) {
+			// человеческая пауза между свингами: CPS перестаёт быть метрономом
+			strikePause--;
+			return;
+		}
+
 		// Сброс спринта: флаг снимется прямо перед sendPosition, и ваниль сама отправит
 		// STOP_SPRINTING в правильном месте очереди. Бьём следующим тиком — когда сервер
 		// уже знает, что мы не в спринте.
@@ -159,12 +203,49 @@ public final class KillAuraModule extends Module {
 
 		attack(mc, player);
 		sprintReset = false;
+		if (profile.is("Human")) {
+			strikePause = (int) MathUtil.random(0.0F, 3.0F);
+		}
+	}
+
+	/**
+	 * Assist (полу-легит): ротации не спувятся вовсе. Аура лишь подтверждает твой собственный
+	 * клик: зажата кнопка атаки, твоя камера смотрит близко к цели и raytrace проходит — тогда
+	 * удар уходит ванильным пакетом в ванильном месте. Античит видит только твою мышь.
+	 */
+	private void assistTick(Minecraft mc, LocalPlayer player) {
+		aiming = false;
+		RotationUtil.clear();
+		updateTarget(mc, player);
+		if (target == null || !mc.options.keyAttack.isDown()) {
+			return;
+		}
+
+		float yaw = player.getYRot();
+		float pitch = player.getXRot();
+		float halfFov = assistFov.getFloat() / 2.0F;
+		float[] rots = RotationUtil.angles(player.getEyePosition(), target.getBoundingBox().getCenter());
+		if (Math.abs(Mth.wrapDegrees(yaw - rots[0])) > halfFov || Math.abs(pitch - rots[1]) > halfFov) {
+			return;
+		}
+		if (!canAttack(player, yaw, pitch)) {
+			return;
+		}
+		if (smartSprint.get() && !sprintReset && player.isSprinting()) {
+			CombatUtil.requestSprintDrop();
+			sprintReset = true;
+			return;
+		}
+		attack(mc, player);
+		sprintReset = false;
 	}
 
 	/**
 	 * Наводка на кадровой частоте: 60–240 обновлений в секунду вместо 20 тиковых — именно это
 	 * убирает рывки. Скорость в градусах за тик, умножается на {@link RenderEvent#deltaTime()},
 	 * поэтому не зависит от FPS; каждый шаг приводится к сетке мыши внутри {@link RotationUtil}.
+	 * В профиле Human к точке прицела добавляется медленное блуждание промаха — идеальное
+	 * сопровождение цели без остаточной ошибки античит aim-модели отличает от человека.
 	 */
 	@Subscribe
 	public void onRender(RenderEvent event) {
@@ -183,6 +264,10 @@ public final class KillAuraModule extends Module {
 		float partial = Mth.clamp(event.partialTick(), 0.0F, 1.0F);
 		Vec3 aim = RotationUtil.lerp(entity, partial).add(aimOffset);
 		float[] dest = RotationUtil.angles(player.getEyePosition(partial), aim);
+		if (profile.is("Human")) {
+			dest[0] += noiseYaw;
+			dest[1] = Mth.clamp(dest[1] + noisePitch, -89.0F, 89.0F);
+		}
 
 		// Fantime не проверяет GCD, так что там можно доводить быстрее; сетка мыши всё равно
 		// соблюдается — она ничего не стоит и не мешает.

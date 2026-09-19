@@ -21,7 +21,7 @@
 ./gradlew build
 ```
 
-Готовый jar: `build/libs/nhack-<version>.jar` (сейчас `nhack-1.1.0.jar`)
+Готовый jar: `build/libs/nhack-<version>.jar` (сейчас `nhack-1.2.0.jar`)
 
 Положи его в `.minecraft/mods` вместе с [Fabric API](https://modrinth.com/mod/fabric-api) для 1.21.11.
 
@@ -74,11 +74,20 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 (ровный CPS — признак автокликера). В меню/инвентаре и на паузе модуль не наводится и не бьёт.
 
 **KillAura** (Combat, класс `KillAuraModule`, раньше `TestModule` и тоже «Aura») — аура под Sloth / Polar / Fantime.
-Настройки: `Rotation` (`Sloth/Polar` — аккуратная наводка, `Fantime` — вдвое быстрее; GCD соблюдается в обоих),
-`Targets` (Players / All / Mobs), `Range` (2.5–6, дефолт 3.0 = ванильный reach), `FOV`, `Speed` (градусов за тик,
-дефолт 18), `Jitter` (разброс скорости наводки, %), `OnlyCrits` (бить только в падении), `SmartSprint` (сброс
-спринта перед ударом), `Silent` (поворот только для сервера, камера не двигается), `Raytrace` (строгий чек хитбокса
-и стены). Кулдаун оружия не форсируется: удар ждёт `getAttackStrengthScale(0.5F) >= 0.9`.
+Главная настройка `Profile`:
+
+- `Legacy` — прежний полный авто-профиль с текущей ротацией;
+- `Human` (по умолчанию) — полный авто-профиль с задержкой реакции при смене цели, небольшим остаточным
+  блужданием прицела и непостоянной паузой между ударами;
+- `Assist` — полу-легит профиль: ротации не подменяются, модуль только подтверждает зажатый ЛКМ, когда
+  твой собственный взгляд уже находится в пределах `AssistFov` от цели и проходит raytrace.
+
+Остальные настройки: `Rotation` (`Sloth/Polar` — аккуратная наводка, `Fantime` — вдвое быстрее; GCD соблюдается
+в обоих), `Targets` (Players / All / Mobs), `Range` (2.5–6, дефолт 3.0 = ванильный reach), `FOV`, `Speed`
+(градусов за тик, дефолт 18), `Jitter` (разброс скорости наводки, %), `OnlyCrits` (бить только в падении),
+`SmartSprint` (сброс спринта перед ударом), `Silent` (поворот только для сервера, камера не двигается),
+`Raytrace` (строгий чек хитбокса и стены), `AssistFov` (угол допуска для Assist). Кулдаун оружия не форсируется:
+удар ждёт `getAttackStrengthScale(0.5F) >= 0.9`.
 
 > Имя модуля пришлось сменить: раньше и `AuraModule`, и `TestModule` назывались `"Aura"`. Конфиг пишется по имени
 > (`modules.add(module.getName(), ...)`), поэтому вторая аура молча перетирала первую, обе читали один и тот же блок
@@ -92,6 +101,7 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
   `handleKeybinds()` раньше `LocalPlayer.sendPosition()`;
 - «смотрим ли в цель» проверяется по `RotationUtil.sentYaw/sentPitch` — повороту, который сервер уже получил;
 - наводка считается каждый кадр в `KillAuraModule.onRender` (`RenderEvent`), скорость не зависит от FPS;
+- в `Assist` `RotationUtil` очищается, поэтому модуль не пишет серверные yaw/pitch вообще;
 - каждая дельта поворота приводится к сетке мыши в `RotationUtil.quantize` (`(float)(counts * sens) * 0.15F`,
   `sens = (sensitivity * 0.6 + 0.2)^3 * 8`) — иначе GCD-проверка ловит за секунды;
 - сброс спринта делает `LocalPlayerMixin.nhack$sprintReset` на HEAD `sendPosition`: флаг снимается до
