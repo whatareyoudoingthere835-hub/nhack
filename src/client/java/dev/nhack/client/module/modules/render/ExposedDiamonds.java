@@ -7,8 +7,8 @@ import dev.nhack.client.event.events.TickEvent;
 import dev.nhack.client.module.Category;
 import dev.nhack.client.module.Module;
 import dev.nhack.client.setting.ColorSetting;
-import dev.nhack.client.setting.ModeSetting;
 import dev.nhack.client.setting.NumberSetting;
+import dev.nhack.client.setting.OreBlacklistSetting;
 import dev.nhack.client.util.ChatUtil;
 import dev.nhack.client.util.WorldToScreen;
 import net.minecraft.ChatFormatting;
@@ -42,9 +42,12 @@ import java.util.function.BiConsumer;
  * сканирование — через {@link TickEvent.Pre}.
  *
  * <p>Анти-xray engine mode 2 (Paper) подмешивает в данные чанка фейковую руду по всем открытым
- * поверхностям, а настоящую прячет камнем и раскрывает только block-update'ом, когда рядом
- * добыли блок. Поэтому в режимах Auto/On руда из данных чанка не доверяется: метки ставятся
- * только по пакетам раскрытия ({@link PacketReceiveEvent}), а фейки отсекаются.
+ * поверхностям, а настоящую прячет камнем и раскрывает только block-update'ом, когда рядом добыли
+ * блок. Фейки отсекаются двумя фильтрами: по количеству воздуха вокруг (фейки сидят в карманах
+ * с 1-3 воздуха, руда в пещерах касается куда больше) и по рудам-соседям из блэклиста (обфускатор
+ * сыпет микс руд вперемешку, настоящие жилы разных руд так близко не срастаются). Дополнительно
+ * пакеты раскрытия ({@link PacketReceiveEvent}) ставят метку на руду, которую сервер сам показал
+ * после добычи соседнего блока, и снимают метку, когда фейк «снимает маску» (руда→камень).
  */
 public final class ExposedDiamonds extends Module {
 	/** Алмазная руда в ванили генерируется от bedrock и до Y=16. */
@@ -56,7 +59,9 @@ public final class ExposedDiamonds extends Module {
 	private final NumberSetting radius = addSetting(new NumberSetting("Radius", "Радиус поиска в чанках, ближние сканируются первыми", 3.0, 1.0, 6.0, 1.0));
 	private final NumberSetting maxY = addSetting(new NumberSetting("MaxY", "Верхняя граница поиска по Y", ORE_MAX_Y, -64.0, 320.0, 1.0));
 	private final NumberSetting maxPerChunk = addSetting(new NumberSetting("MaxPerChunk", "Максимум меток на чанк, 0 = без лимита", 20.0, 0.0, 64.0, 1.0));
-	private final ModeSetting antiXray = addSetting(new ModeSetting("AntiXray", "Учёт анти-xray сервера: Off — доверять руде из чанков, On — только раскрытия block-update, Auto — самоопределение по плотности фейков", "Auto", "Off", "Auto", "On"));
+	private final NumberSetting airMin = addSetting(new NumberSetting("AirMin", "Минимум воздуха в кубе 3×3×3 вокруг руды: меньше — метка не ставится. Фейки анти-xray сидят в карманах с 1-3 воздуха, руда в пещерах касается ~9. 0 = выкл", 4.0, 0.0, 26.0, 1.0));
+	private final NumberSetting oreRadius = addSetting(new NumberSetting("OreRadius", "Радиус проверки руд-соседей вокруг алмаза, блоков в каждую сторону", 4.0, 1.0, 8.0, 1.0));
+	private final OreBlacklistSetting oreBlacklist = addSetting(new OreBlacklistSetting("OreBlacklist", "Руды-соседи, при которых метка не ставится: обфускатор сыпет микс руд рядом, настоящие жилы растут поодиночке. Клик — раскрыть список с галочками"));
 	private final ColorSetting diamondColor = addSetting(new ColorSetting("DiamondColor", "Цвет алмаза", 0xFF00BBFF));
 
 	/** Потокобезопасный список для рендера: скан и рендер идут в клиентском потоке, но список читают итератором. */
@@ -70,7 +75,7 @@ public final class ExposedDiamonds extends Module {
 	private int lastChunkX = Integer.MIN_VALUE;
 	private int lastChunkZ = Integer.MIN_VALUE;
 	private String scannedDimension = "";
-	private boolean obfuscationDetected;
+	private boolean obfuscationNotified;
 
 	public ExposedDiamonds() {
 		super("CaveXRay", "Подсвечивает открытые алмазы на 2D экране", Category.RENDER);
@@ -80,7 +85,7 @@ public final class ExposedDiamonds extends Module {
 	protected void onEnable() {
 		foundDiamonds.clear();
 		revealedOres.clear();
-		obfuscationDetected = false;
+		obfuscationNotified = false;
 		scanIndex = 0;
 		cachedRadius = Integer.MIN_VALUE;
 		lastChunkX = Integer.MIN_VALUE;
@@ -92,7 +97,7 @@ public final class ExposedDiamonds extends Module {
 	protected void onDisable() {
 		foundDiamonds.clear();
 		revealedOres.clear();
-		obfuscationDetected = false;
+		obfuscationNotified = false;
 		scanIndex = 0;
 		lastChunkX = Integer.MIN_VALUE;
 		lastChunkZ = Integer.MIN_VALUE;
@@ -111,7 +116,7 @@ public final class ExposedDiamonds extends Module {
 			scannedDimension = dimension;
 			foundDiamonds.clear();
 			revealedOres.clear();
-			obfuscationDetected = false;
+			obfuscationNotified = false;
 			scanIndex = 0;
 			lastChunkX = Integer.MIN_VALUE;
 			lastChunkZ = Integer.MIN_VALUE;
@@ -204,38 +209,36 @@ public final class ExposedDiamonds extends Module {
 			return;
 		}
 
-		// При включённом учёте анти-xray руда из данных чанка не читается вовсе: на серверах с
-		// engine mode 2 она целиком фейковая, а настоящая придёт отдельным пакетом раскрытия.
-		boolean trustChunkData = antiXray.is("Off") || (antiXray.is("Auto") && !obfuscationDetected);
+		List<BlockPos> candidates = new ArrayList<>();
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		BlockPos.MutableBlockPos adjPos = new BlockPos.MutableBlockPos();
+		BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
 
-		List<BlockPos> newFound = new ArrayList<>();
-		if (trustChunkData) {
-			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-			BlockPos.MutableBlockPos adjPos = new BlockPos.MutableBlockPos();
-			BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
+		for (int x = 0; x < 16; x++) {
+			for (int z = 0; z < 16; z++) {
+				for (int y = minY; y <= topY; y++) {
+					pos.set(minX + x, y, minZ + z);
+					BlockState state = chunk.getBlockState(pos);
 
-			for (int x = 0; x < 16; x++) {
-				for (int z = 0; z < 16; z++) {
-					for (int y = minY; y <= topY; y++) {
-						pos.set(minX + x, y, minZ + z);
-						BlockState state = chunk.getBlockState(pos);
-
-						if (isDiamondOre(state)) {
-							if (isExposed(level, pos, adjPos, probe)) {
-								newFound.add(pos.immutable());
-							}
+					if (isDiamondOre(state)) {
+						if (isExposed(level, pos, adjPos, probe)) {
+							candidates.add(pos.immutable());
 						}
 					}
 				}
 			}
+		}
 
-			if (antiXray.is("Auto") && newFound.size() >= OBFUSCATION_PER_CHUNK) {
-				// Ванильная генерация не даёт десятки открытых алмазов в чанке: это обфускатор.
-				obfuscationDetected = true;
-				newFound.clear();
-				foundDiamonds.clear();
-				revealedOres.clear();
-				ChatUtil.send(ChatFormatting.YELLOW, "Похоже на анти-xray engine mode 2: руда из чанков фейковая, отмечаю только раскрытую block-update'ами рядом с добытым блоком. Отключить авто-режим: настройка AntiXray.");
+		if (candidates.size() >= OBFUSCATION_PER_CHUNK && !obfuscationNotified) {
+			// Ванильная генерация не даёт десятки открытых алмазов в чанке: это обфускатор.
+			obfuscationNotified = true;
+			ChatUtil.send(ChatFormatting.YELLOW, "Похоже на анти-xray engine mode 2: фильтрую фейки по воздуху вокруг и рудам-соседям, а раскрытую сервером руду ловлю по block-update'ам.");
+		}
+
+		List<BlockPos> newFound = new ArrayList<>();
+		for (BlockPos candidate : candidates) {
+			if (passesFilters(level, candidate, probe)) {
+				newFound.add(candidate);
 			}
 		}
 
@@ -349,6 +352,62 @@ public final class ExposedDiamonds extends Module {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Фильтры фейков анти-xray. Воздух: в кубе 3×3×3 вокруг руды его должно быть не меньше AirMin —
+	 * фейки обфускатора стоят в узких карманах (1-3 воздуха), руда в живой пещере касается гораздо
+	 * большего. Руды-соседи: в кубе радиуса OreRadius не должно быть руды из блэклиста — обфускатор
+	 * сеет микс руд вперемешку, а настоящие жилы разных руд вплотную почти не срастаются.
+	 * Незагруженные соседи не читаются воздухом и не читаются рудой: пропускаются явно.
+	 */
+	private boolean passesFilters(Level level, BlockPos pos, BlockPos.MutableBlockPos probe) {
+		int airMin = this.airMin.getInt();
+		if (airMin > 0) {
+			int air = 0;
+			for (int dx = -1; dx <= 1; dx++) {
+				for (int dy = -1; dy <= 1; dy++) {
+					for (int dz = -1; dz <= 1; dz++) {
+						if (dx == 0 && dy == 0 && dz == 0) {
+							continue;
+						}
+						probe.set(pos.getX() + dx, pos.getY() + dy, pos.getZ() + dz);
+						if (!level.isInsideBuildHeight(probe.getY()) || !level.hasChunkAt(probe)) {
+							continue;
+						}
+						BlockState state = level.getBlockState(probe);
+						if (state != null && state.isAir()) {
+							air++;
+						}
+					}
+				}
+			}
+			if (air < airMin) {
+				return false;
+			}
+		}
+
+		if (!oreBlacklist.isEmpty()) {
+			int r = oreRadius.getInt();
+			for (int dx = -r; dx <= r; dx++) {
+				for (int dy = -r; dy <= r; dy++) {
+					for (int dz = -r; dz <= r; dz++) {
+						if (dx == 0 && dy == 0 && dz == 0) {
+							continue;
+						}
+						probe.set(pos.getX() + dx, pos.getY() + dy, pos.getZ() + dz);
+						if (!level.isInsideBuildHeight(probe.getY()) || !level.hasChunkAt(probe)) {
+							continue;
+						}
+						BlockState state = level.getBlockState(probe);
+						if (state != null && oreBlacklist.isBlacklisted(state.getBlock())) {
+							return false;
+						}
+					}
+				}
+			}
+		}
+		return true;
 	}
 
 	/** У воздушной клетки должен быть ещё один воздушный сосед: карман 1×1 в камне — не пещера. */

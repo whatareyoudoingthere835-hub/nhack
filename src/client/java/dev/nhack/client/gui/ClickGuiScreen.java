@@ -12,6 +12,7 @@ import dev.nhack.client.setting.BoolSetting;
 import dev.nhack.client.setting.ColorSetting;
 import dev.nhack.client.setting.ModeSetting;
 import dev.nhack.client.setting.NumberSetting;
+import dev.nhack.client.setting.OreBlacklistSetting;
 import dev.nhack.client.setting.Setting;
 import dev.nhack.client.util.ColorUtil;
 import dev.nhack.client.util.RgbUtil;
@@ -34,6 +35,7 @@ public final class ClickGuiScreen extends Screen {
 	private static final int SIDEBAR = 118;
 	private static final int SETTINGS = 214;
 	private static final int ROW = 22;
+	private static final int SUBROW = 16;
 	private static final int PAD = 10;
 
 	private int winX;
@@ -49,6 +51,7 @@ public final class ClickGuiScreen extends Screen {
 	private Module binding;
 	private BindSetting bindingSetting;
 	private NumberSetting sliding;
+	private OreBlacklistSetting expandedList;
 
 	private int moduleScroll;
 	private int settingScroll;
@@ -233,6 +236,13 @@ public final class ClickGuiScreen extends Screen {
 				cursor = drawSettingRow(graphics, font, mouseX, mouseY, sx, sw, cursor, setting.getName(), value, bindingSetting == bind);
 			} else if (setting instanceof ColorSetting color) {
 				cursor = drawSettingRow(graphics, font, mouseX, mouseY, sx, sw, cursor, setting.getName(), color.hex(), true);
+			} else if (setting instanceof OreBlacklistSetting list) {
+				boolean open = expandedList == list;
+				String value = list.count() + "/" + OreBlacklistSetting.ENTRIES.size() + (open ? "  [-]" : "  [+]");
+				cursor = drawSettingRow(graphics, font, mouseX, mouseY, sx, sw, cursor, setting.getName(), value, true);
+				if (open) {
+					cursor = drawBlacklistRows(graphics, font, mouseX, mouseY, sx, sw, cursor, list);
+				}
 			} else if (setting instanceof NumberSetting number) {
 				boolean hover = hovered(mouseX, mouseY, sx + 10, cursor, sw - 20, 34);
 				graphics.fill(sx + 10, cursor, sx + sw - 10, cursor + 34, hover ? ColorUtil.ROW_HOVER : ColorUtil.ROW);
@@ -252,6 +262,33 @@ public final class ClickGuiScreen extends Screen {
 		}
 
 		graphics.disableScissor();
+	}
+
+	/** Раскрытый блэклист руд: строка на руду с чекбоксом, крестик = руда в блэклисте. */
+	private int drawBlacklistRows(GuiGraphics graphics, Font font, int mouseX, int mouseY, int sx, int sw, int cursor, OreBlacklistSetting list) {
+		for (OreBlacklistSetting.Entry entry : OreBlacklistSetting.ENTRIES) {
+			boolean on = list.get().contains(entry.id());
+			boolean hover = hovered(mouseX, mouseY, sx + 14, cursor, sw - 24, SUBROW);
+			graphics.fill(sx + 14, cursor, sx + sw - 10, cursor + SUBROW, hover ? ColorUtil.ROW_HOVER : 0x26000000);
+
+			int bx = sx + 20;
+			int by = cursor + 4;
+			if (on) {
+				RgbUtil.fill(graphics, bx, by, bx + 8, by + 8, ColorUtil.ACCENT);
+				for (int i = 0; i < 6; i++) {
+					graphics.fill(bx + 1 + i, by + 1 + i, bx + 2 + i, by + 2 + i, 0xFFF2F2F4);
+					graphics.fill(bx + 6 - i, by + 1 + i, bx + 7 - i, by + 2 + i, 0xFFF2F2F4);
+				}
+			} else {
+				graphics.fill(bx, by, bx + 8, by + 1, ColorUtil.TEXT_DIM);
+				graphics.fill(bx, by + 7, bx + 8, by + 8, ColorUtil.TEXT_DIM);
+				graphics.fill(bx, by, bx + 1, by + 8, ColorUtil.TEXT_DIM);
+				graphics.fill(bx + 7, by, bx + 8, by + 8, ColorUtil.TEXT_DIM);
+			}
+			graphics.drawString(font, entry.label(), sx + 34, cursor + 4, on ? ColorUtil.TEXT : ColorUtil.TEXT_DIM);
+			cursor += SUBROW + 2;
+		}
+		return cursor + 2;
 	}
 
 	private int drawSettingRow(GuiGraphics graphics, Font font, int mouseX, int mouseY, int sx, int sw, int cursor, String name, String value, boolean accentValue) {
@@ -407,6 +444,24 @@ public final class ClickGuiScreen extends Screen {
 		cursor += ROW + 4;
 
 		for (Setting<?> setting : focused.getSettings()) {
+			if (setting instanceof OreBlacklistSetting list) {
+				if (hovered(mouseX, mouseY, sx + 10, cursor, sw - 20, ROW) && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+					expandedList = expandedList == list ? null : list;
+					return true;
+				}
+				cursor += ROW + 4;
+				if (expandedList == list) {
+					for (OreBlacklistSetting.Entry entry : OreBlacklistSetting.ENTRIES) {
+						if (hovered(mouseX, mouseY, sx + 14, cursor, sw - 24, SUBROW) && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+							list.toggle(entry.id());
+							return true;
+						}
+						cursor += SUBROW + 2;
+					}
+					cursor += 2;
+				}
+				continue;
+			}
 			if (setting instanceof NumberSetting number) {
 				if (hovered(mouseX, mouseY, sx + 10, cursor, sw - 20, 34) && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
 					sliding = number;
