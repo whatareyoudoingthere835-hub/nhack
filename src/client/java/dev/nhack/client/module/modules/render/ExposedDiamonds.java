@@ -2,17 +2,23 @@ package dev.nhack.client.module.modules.render;
 
 import dev.nhack.client.event.Subscribe;
 import dev.nhack.client.event.events.HudRenderEvent;
+import dev.nhack.client.event.events.PacketReceiveEvent;
 import dev.nhack.client.event.events.TickEvent;
 import dev.nhack.client.module.Category;
 import dev.nhack.client.module.Module;
 import dev.nhack.client.setting.ColorSetting;
+import dev.nhack.client.setting.ModeSetting;
 import dev.nhack.client.setting.NumberSetting;
+import dev.nhack.client.util.ChatUtil;
 import dev.nhack.client.util.WorldToScreen;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -22,7 +28,10 @@ import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiConsumer;
 
 /**
  * «Иксрей» для алмазов: подсвечивает на 2D-экране только <b>открытую</b> алмазную руду
@@ -31,18 +40,29 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * <p>Сканирование разбито на чанки: один тик — один чанк, поэтому включённый модуль
  * не просаживает TPS. Рендер идёт через {@link HudRenderEvent} (Fabric HUD-хук),
  * сканирование — через {@link TickEvent.Pre}.
+ *
+ * <p>Анти-xray engine mode 2 (Paper) подмешивает в данные чанка фейковую руду по всем открытым
+ * поверхностям, а настоящую прячет камнем и раскрывает только block-update'ом, когда рядом
+ * добыли блок. Поэтому в режимах Auto/On руда из данных чанка не доверяется: метки ставятся
+ * только по пакетам раскрытия ({@link PacketReceiveEvent}), а фейки отсекаются.
  */
 public final class ExposedDiamonds extends Module {
 	/** Алмазная руда в ванили генерируется от bedrock и до Y=16. */
 	private static final int ORE_MAX_Y = 16;
 
+	/** Столько «открытых» алмазов в одном чанке ваниль не даёт: это обфускатор анти-xray. */
+	private static final int OBFUSCATION_PER_CHUNK = 12;
+
 	private final NumberSetting radius = addSetting(new NumberSetting("Radius", "Радиус поиска в чанках, ближние сканируются первыми", 3.0, 1.0, 6.0, 1.0));
 	private final NumberSetting maxY = addSetting(new NumberSetting("MaxY", "Верхняя граница поиска по Y", ORE_MAX_Y, -64.0, 320.0, 1.0));
 	private final NumberSetting maxPerChunk = addSetting(new NumberSetting("MaxPerChunk", "Максимум меток на чанк, 0 = без лимита", 20.0, 0.0, 64.0, 1.0));
+	private final ModeSetting antiXray = addSetting(new ModeSetting("AntiXray", "Учёт анти-xray сервера: Off — доверять руде из чанков, On — только раскрытия block-update, Auto — самоопределение по плотности фейков", "Auto", "Off", "Auto", "On"));
 	private final ColorSetting diamondColor = addSetting(new ColorSetting("DiamondColor", "Цвет алмаза", 0xFF00BBFF));
 
 	/** Потокобезопасный список для рендера: скан и рендер идут в клиентском потоке, но список читают итератором. */
 	private final List<BlockPos> foundDiamonds = new CopyOnWriteArrayList<>();
+	/** Руда, которую сервер сам раскрыл block-update'ом: единственный честный сигнал при анти-xray mode 2. */
+	private final Set<BlockPos> revealedOres = ConcurrentHashMap.newKeySet();
 	private final List<int[]> chunkOffsets = new ArrayList<>();
 
 	private int scanIndex;
@@ -50,6 +70,7 @@ public final class ExposedDiamonds extends Module {
 	private int lastChunkX = Integer.MIN_VALUE;
 	private int lastChunkZ = Integer.MIN_VALUE;
 	private String scannedDimension = "";
+	private boolean obfuscationDetected;
 
 	public ExposedDiamonds() {
 		super("CaveXRay", "Подсвечивает открытые алмазы на 2D экране", Category.RENDER);
@@ -58,6 +79,8 @@ public final class ExposedDiamonds extends Module {
 	@Override
 	protected void onEnable() {
 		foundDiamonds.clear();
+		revealedOres.clear();
+		obfuscationDetected = false;
 		scanIndex = 0;
 		cachedRadius = Integer.MIN_VALUE;
 		lastChunkX = Integer.MIN_VALUE;
@@ -68,6 +91,8 @@ public final class ExposedDiamonds extends Module {
 	@Override
 	protected void onDisable() {
 		foundDiamonds.clear();
+		revealedOres.clear();
+		obfuscationDetected = false;
 		scanIndex = 0;
 		lastChunkX = Integer.MIN_VALUE;
 		lastChunkZ = Integer.MIN_VALUE;
@@ -85,6 +110,8 @@ public final class ExposedDiamonds extends Module {
 			// Портал/телепорт: отметки из прошлого измерения уже бессмысленны.
 			scannedDimension = dimension;
 			foundDiamonds.clear();
+			revealedOres.clear();
+			obfuscationDetected = false;
 			scanIndex = 0;
 			lastChunkX = Integer.MIN_VALUE;
 			lastChunkZ = Integer.MIN_VALUE;
@@ -177,23 +204,38 @@ public final class ExposedDiamonds extends Module {
 			return;
 		}
 
+		// При включённом учёте анти-xray руда из данных чанка не читается вовсе: на серверах с
+		// engine mode 2 она целиком фейковая, а настоящая придёт отдельным пакетом раскрытия.
+		boolean trustChunkData = antiXray.is("Off") || (antiXray.is("Auto") && !obfuscationDetected);
+
 		List<BlockPos> newFound = new ArrayList<>();
-		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-		BlockPos.MutableBlockPos adjPos = new BlockPos.MutableBlockPos();
-		BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
+		if (trustChunkData) {
+			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+			BlockPos.MutableBlockPos adjPos = new BlockPos.MutableBlockPos();
+			BlockPos.MutableBlockPos probe = new BlockPos.MutableBlockPos();
 
-		for (int x = 0; x < 16; x++) {
-			for (int z = 0; z < 16; z++) {
-				for (int y = minY; y <= topY; y++) {
-					pos.set(minX + x, y, minZ + z);
-					BlockState state = chunk.getBlockState(pos);
+			for (int x = 0; x < 16; x++) {
+				for (int z = 0; z < 16; z++) {
+					for (int y = minY; y <= topY; y++) {
+						pos.set(minX + x, y, minZ + z);
+						BlockState state = chunk.getBlockState(pos);
 
-					if (state != null && (state.is(Blocks.DIAMOND_ORE) || state.is(Blocks.DEEPSLATE_DIAMOND_ORE))) {
-						if (isExposed(level, pos, adjPos, probe)) {
-							newFound.add(pos.immutable());
+						if (isDiamondOre(state)) {
+							if (isExposed(level, pos, adjPos, probe)) {
+								newFound.add(pos.immutable());
+							}
 						}
 					}
 				}
+			}
+
+			if (antiXray.is("Auto") && newFound.size() >= OBFUSCATION_PER_CHUNK) {
+				// Ванильная генерация не даёт десятки открытых алмазов в чанке: это обфускатор.
+				obfuscationDetected = true;
+				newFound.clear();
+				foundDiamonds.clear();
+				revealedOres.clear();
+				ChatUtil.send(ChatFormatting.YELLOW, "Похоже на анти-xray engine mode 2: руда из чанков фейковая, отмечаю только раскрытую block-update'ами рядом с добытым блоком. Отключить авто-режим: настройка AntiXray.");
 			}
 		}
 
@@ -213,9 +255,68 @@ public final class ExposedDiamonds extends Module {
 			newFound = new ArrayList<>(newFound.subList(0, cap));
 		}
 
-		// Чанк пересканирован — старые отметки из него заменяем свежими.
-		foundDiamonds.removeIf(p -> (p.getX() >> 4) == chunkX && (p.getZ() >> 4) == chunkZ);
+		// Чанк пересканирован — старые отметки из него заменяем свежими, но раскрытые сервером
+		// блоки переживают перескан: они не из данных чанка, а из пакетов обновления.
+		foundDiamonds.removeIf(p -> ((p.getX() >> 4) == chunkX && (p.getZ() >> 4) == chunkZ) && !revealedOres.contains(p));
 		foundDiamonds.addAll(newFound);
+	}
+
+	@Subscribe
+	public void onPacketReceive(PacketReceiveEvent event) {
+		if (!isEnabled()) {
+			return;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null || mc.player == null) {
+			return;
+		}
+
+		Object packet = event.packet();
+		if (packet instanceof ClientboundBlockUpdatePacket update) {
+			handleBlockUpdate(mc, update.getPos(), update.getBlockState());
+		} else if (packet instanceof ClientboundSectionBlocksUpdatePacket update) {
+			BiConsumer<BlockPos, BlockState> consumer = (pos, state) -> handleBlockUpdate(mc, pos, state);
+			update.runUpdates(consumer);
+		}
+	}
+
+	/**
+	 * Камень стал алмазом — сервер раскрыл настоящую руду (update-radius анти-xray после добычи
+	 * соседнего блока): ставим метку. Алмаз стал камнем — это фейк обфускатора, снявший маску,
+	 * или выкопанная руда (стала воздухом): метку убираем.
+	 */
+	private void handleBlockUpdate(Minecraft mc, BlockPos pos, BlockState newState) {
+		if (pos == null || newState == null) {
+			return;
+		}
+
+		boolean wasOre = isDiamondOre(mc.level.getBlockState(pos));
+		boolean nowOre = isDiamondOre(newState);
+		if (wasOre == nowOre) {
+			return;
+		}
+
+		if (nowOre) {
+			if (pos.getY() > maxY.getInt()) {
+				return;
+			}
+			int dx = Math.abs((pos.getX() >> 4) - (mc.player.getBlockX() >> 4));
+			int dz = Math.abs((pos.getZ() >> 4) - (mc.player.getBlockZ() >> 4));
+			if (dx > radius.getInt() || dz > radius.getInt()) {
+				return;
+			}
+			BlockPos immutable = pos.immutable();
+			if (revealedOres.add(immutable)) {
+				foundDiamonds.add(immutable);
+			}
+		} else {
+			revealedOres.remove(pos);
+			foundDiamonds.remove(pos);
+		}
+	}
+
+	private static boolean isDiamondOre(BlockState state) {
+		return state != null && (state.is(Blocks.DIAMOND_ORE) || state.is(Blocks.DEEPSLATE_DIAMOND_ORE));
 	}
 
 	/**
@@ -282,10 +383,13 @@ public final class ExposedDiamonds extends Module {
 	}
 
 	private void pruneOutOfRange(int playerChunkX, int playerChunkZ, int radius) {
-		foundDiamonds.removeIf(pos -> {
-			int cx = pos.getX() >> 4;
-			int cz = pos.getZ() >> 4;
-			return Math.abs(cx - playerChunkX) > radius || Math.abs(cz - playerChunkZ) > radius;
-		});
+		foundDiamonds.removeIf(pos -> isOutOfRange(pos, playerChunkX, playerChunkZ, radius));
+		revealedOres.removeIf(pos -> isOutOfRange(pos, playerChunkX, playerChunkZ, radius));
+	}
+
+	private static boolean isOutOfRange(BlockPos pos, int playerChunkX, int playerChunkZ, int radius) {
+		int cx = pos.getX() >> 4;
+		int cz = pos.getZ() >> 4;
+		return Math.abs(cx - playerChunkX) > radius || Math.abs(cz - playerChunkZ) > radius;
 	}
 }
