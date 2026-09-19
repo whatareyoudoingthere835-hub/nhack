@@ -33,16 +33,13 @@ public final class OreBlacklistSetting extends Setting<List<String>> {
 		new Entry("deepslate_gold_ore", "Глубинное золото", Blocks.DEEPSLATE_GOLD_ORE)
 	);
 
+	/**
+	 * По умолчанию блэклист пуст: на серверах с анти-xray фейковая руда стоит рядом с чем угодно,
+	 * поэтому предзаполненный список съедал и настоящие алмазы тоже (5 из 5 на catlean.su).
+	 * Крестики расставляются вручную под конкретный сервер.
+	 */
 	public OreBlacklistSetting(String name, String description) {
-		super(name, description, allIds());
-	}
-
-	private static List<String> allIds() {
-		List<String> ids = new ArrayList<>();
-		for (Entry entry : ENTRIES) {
-			ids.add(entry.id());
-		}
-		return List.copyOf(ids);
+		super(name, description, List.of());
 	}
 
 	@Override

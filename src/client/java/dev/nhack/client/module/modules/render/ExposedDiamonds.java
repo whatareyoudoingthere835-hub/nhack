@@ -3,9 +3,11 @@ package dev.nhack.client.module.modules.render;
 import dev.nhack.client.event.Subscribe;
 import dev.nhack.client.event.events.HudRenderEvent;
 import dev.nhack.client.event.events.PacketReceiveEvent;
+import dev.nhack.client.event.events.PacketSendEvent;
 import dev.nhack.client.event.events.TickEvent;
 import dev.nhack.client.module.Category;
 import dev.nhack.client.module.Module;
+import dev.nhack.client.setting.BoolSetting;
 import dev.nhack.client.setting.ColorSetting;
 import dev.nhack.client.setting.NumberSetting;
 import dev.nhack.client.setting.OreBlacklistSetting;
@@ -18,6 +20,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
@@ -61,13 +64,17 @@ public final class ExposedDiamonds extends Module {
 	private final NumberSetting maxPerChunk = addSetting(new NumberSetting("MaxPerChunk", "Максимум меток на чанк, 0 = без лимита", 20.0, 0.0, 64.0, 1.0));
 	private final NumberSetting airMin = addSetting(new NumberSetting("AirMin", "Минимум воздуха в кубе 3×3×3 вокруг руды: меньше — метка не ставится. Фейки анти-xray сидят в карманах с 1-3 воздуха, руда в пещерах касается ~9. 0 = выкл", 4.0, 0.0, 26.0, 1.0));
 	private final NumberSetting oreRadius = addSetting(new NumberSetting("OreRadius", "Радиус проверки руд-соседей вокруг алмаза, блоков в каждую сторону", 4.0, 1.0, 8.0, 1.0));
-	private final OreBlacklistSetting oreBlacklist = addSetting(new OreBlacklistSetting("OreBlacklist", "Руды-соседи, при которых метка не ставится: обфускатор сыпет микс руд рядом, настоящие жилы растут поодиночке. Клик — раскрыть список с галочками"));
+	private final OreBlacklistSetting oreBlacklist = addSetting(new OreBlacklistSetting("OreBlacklist", "Руды-соседи, при которых метка не ставится. Пусто по умолчанию: на анти-xray фейки стоят рядом с чем угодно и список съедал настоящие алмазы. Клик — раскрыть список с галочками"));
+	private final BoolSetting noChunkLimit = addSetting(new BoolSetting("NoChunkLimit", "Убрать потолок MaxPerChunk: метки со всего чанка без лимита", false));
+	private final BoolSetting manualMark = addSetting(new BoolSetting("ManualMark", "ЛКМ по алмазной руде ставит постоянную метку: для настоящих алмазов, которые фильтры пропустили", false));
 	private final ColorSetting diamondColor = addSetting(new ColorSetting("DiamondColor", "Цвет алмаза", 0xFF00BBFF));
 
 	/** Потокобезопасный список для рендера: скан и рендер идут в клиентском потоке, но список читают итератором. */
 	private final List<BlockPos> foundDiamonds = new CopyOnWriteArrayList<>();
 	/** Руда, которую сервер сам раскрыл block-update'ом: единственный честный сигнал при анти-xray mode 2. */
 	private final Set<BlockPos> revealedOres = ConcurrentHashMap.newKeySet();
+	/** Метки, поставленные игроком вручную ЛКМ: переживают пересканы и фильтры. */
+	private final Set<BlockPos> manualOres = ConcurrentHashMap.newKeySet();
 	private final List<int[]> chunkOffsets = new ArrayList<>();
 
 	private int scanIndex;
@@ -85,6 +92,7 @@ public final class ExposedDiamonds extends Module {
 	protected void onEnable() {
 		foundDiamonds.clear();
 		revealedOres.clear();
+		manualOres.clear();
 		obfuscationNotified = false;
 		scanIndex = 0;
 		cachedRadius = Integer.MIN_VALUE;
@@ -97,6 +105,7 @@ public final class ExposedDiamonds extends Module {
 	protected void onDisable() {
 		foundDiamonds.clear();
 		revealedOres.clear();
+		manualOres.clear();
 		obfuscationNotified = false;
 		scanIndex = 0;
 		lastChunkX = Integer.MIN_VALUE;
@@ -243,7 +252,7 @@ public final class ExposedDiamonds extends Module {
 		}
 
 		int cap = maxPerChunk.getInt();
-		if (cap > 0 && newFound.size() > cap) {
+		if (!noChunkLimit.get() && cap > 0 && newFound.size() > cap) {
 			// «Алмазное море» анархии: из чанка берём только ближайшие к игроку, иначе экран
 			// тонет в тысячах меток, а рендер кладёт FPS.
 			double px = mc.player.getX();
@@ -260,7 +269,8 @@ public final class ExposedDiamonds extends Module {
 
 		// Чанк пересканирован — старые отметки из него заменяем свежими, но раскрытые сервером
 		// блоки переживают перескан: они не из данных чанка, а из пакетов обновления.
-		foundDiamonds.removeIf(p -> ((p.getX() >> 4) == chunkX && (p.getZ() >> 4) == chunkZ) && !revealedOres.contains(p));
+		foundDiamonds.removeIf(p -> ((p.getX() >> 4) == chunkX && (p.getZ() >> 4) == chunkZ)
+				&& !revealedOres.contains(p) && !manualOres.contains(p));
 		foundDiamonds.addAll(newFound);
 	}
 
@@ -314,7 +324,32 @@ public final class ExposedDiamonds extends Module {
 			}
 		} else {
 			revealedOres.remove(pos);
+			manualOres.remove(pos);
 			foundDiamonds.remove(pos);
+		}
+	}
+
+	/**
+	 * Ручная разметка: ЛКМ по руде уходит на сервер пакетом начала добычи, и если там действительно
+	 * алмаз — ставим постоянную метку. Так помечаются настоящие алмазы, которые фильтры пропустили.
+	 */
+	@Subscribe
+	public void onPacketSend(PacketSendEvent event) {
+		if (!manualMark.get() || !isEnabled()) {
+			return;
+		}
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null) {
+			return;
+		}
+
+		Object packet = event.packet();
+		if (packet instanceof ServerboundPlayerActionPacket action
+				&& action.getAction() == ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK) {
+			BlockPos pos = action.getPos();
+			if (isDiamondOre(mc.level.getBlockState(pos)) && manualOres.add(pos.immutable())) {
+				foundDiamonds.add(pos.immutable());
+			}
 		}
 	}
 
@@ -444,6 +479,7 @@ public final class ExposedDiamonds extends Module {
 	private void pruneOutOfRange(int playerChunkX, int playerChunkZ, int radius) {
 		foundDiamonds.removeIf(pos -> isOutOfRange(pos, playerChunkX, playerChunkZ, radius));
 		revealedOres.removeIf(pos -> isOutOfRange(pos, playerChunkX, playerChunkZ, radius));
+		manualOres.removeIf(pos -> isOutOfRange(pos, playerChunkX, playerChunkZ, radius));
 	}
 
 	private static boolean isOutOfRange(BlockPos pos, int playerChunkX, int playerChunkZ, int radius) {
