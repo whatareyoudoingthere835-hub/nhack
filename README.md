@@ -21,7 +21,7 @@
 ./gradlew build
 ```
 
-Готовый jar: `build/libs/nhack-<version>.jar` (сейчас `nhack-1.2.0.jar`)
+Готовый jar: `build/libs/nhack-<version>.jar` (сейчас `nhack-1.1.1.jar`)
 
 Положи его в `.minecraft/mods` вместе с [Fabric API](https://modrinth.com/mod/fabric-api) для 1.21.11.
 
@@ -86,7 +86,8 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 в обоих), `Targets` (Players / All / Mobs), `Range` (2.5–6, дефолт 3.0 = ванильный reach), `FOV`, `Speed`
 (градусов за тик, дефолт 18), `Jitter` (разброс скорости наводки, %), `OnlyCrits` (бить только в падении),
 `SmartSprint` (сброс спринта перед ударом), `Silent` (поворот только для сервера, камера не двигается),
-`Raytrace` (строгий чек хитбокса и стены), `AssistFov` (угол допуска для Assist). Кулдаун оружия не форсируется:
+`MoveFix` (движение по серверной ротации KillAura при `Silent`), `Raytrace` (строгий чек хитбокса и стены),
+`AssistFov` (угол допуска для Assist). Кулдаун оружия не форсируется:
 удар ждёт `getAttackStrengthScale(0.5F) >= 0.9`.
 
 > Имя модуля пришлось сменить: раньше и `AuraModule`, и `TestModule` назывались `"Aura"`. Конфиг пишется по имени
@@ -102,6 +103,8 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 - «смотрим ли в цель» проверяется по `RotationUtil.sentYaw/sentPitch` — повороту, который сервер уже получил;
 - наводка считается каждый кадр в `KillAuraModule.onRender` (`RenderEvent`), скорость не зависит от FPS;
 - в `Assist` `RotationUtil` очищается, поэтому модуль не пишет серверные yaw/pitch вообще;
+- при `MoveFix` вектор WASD временно поворачивается на разницу между камерой и серверной ротацией,
+  поэтому `W` ведёт в сторону, куда KillAura бьёт, даже при `Silent`;
 - каждая дельта поворота приводится к сетке мыши в `RotationUtil.quantize` (`(float)(counts * sens) * 0.15F`,
   `sens = (sensitivity * 0.6 + 0.2)^3 * 8`) — иначе GCD-проверка ловит за секунды;
 - сброс спринта делает `LocalPlayerMixin.nhack$sprintReset` на HEAD `sendPosition`: флаг снимается до
@@ -112,6 +115,8 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 **NoSlow** (Movement): NCP, StrictNCP, Matrix, Grim, GrimNew, MusteryGrief, LFCraft, Matrix2/3 + food/shield/blocks.
 
 **ESP** (Render): 2D-боксы, HP, TNT, перлы, burrow, маяки, lingering clouds.
+
+**Fullbright** (Render): полный свет через GPU-lightmap 1.21.11; `Intensity=1.0` даёт максимальную яркость.
 
 **CaveXRay** (Render, класс `ExposedDiamonds`): 2D-подсветка **открытой** алмазной руды — `diamond_ore` и
 `deepslate_diamond_ore`. «Открытая» значит рядом настоящая полость: воздушный сосед засчитывается, только если сам

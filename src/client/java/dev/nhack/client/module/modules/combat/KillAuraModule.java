@@ -56,6 +56,7 @@ public final class KillAuraModule extends Module {
 	private final BoolSetting onlyCrits = addSetting(new BoolSetting("OnlyCrits", "Бьет только в падении (криты)", true));
 	private final BoolSetting smartSprint = addSetting(new BoolSetting("SmartSprint", "Сброс спринта для обхода Polar", true));
 	private final BoolSetting silent = addSetting(new BoolSetting("Silent", "Вращение только на сервере", true));
+	private final BoolSetting moveFix = addSetting(new BoolSetting("MoveFix", "Движение относительно серверной ротации KillAura", true));
 	private final BoolSetting raytrace = addSetting(new BoolSetting("Raytrace", "Строгий чек хитбокса (Polar Safe)", true));
 	private final NumberSetting assistFov = addSetting(new NumberSetting("AssistFov", "Assist: максимум градусов между твоим взглядом и целью, иначе аура не подтверждает клик", 30.0, 5.0, 90.0, 1.0));
 
@@ -102,6 +103,11 @@ public final class KillAuraModule extends Module {
 			rotationPitch = mc.player.getXRot();
 			RotationUtil.captureVisual(mc.player);
 		}
+	}
+
+	/** Используется LocalPlayerMixin: исправлять WASD только при скрытой ротации KillAura. */
+	public boolean shouldMoveFix() {
+		return isEnabled() && moveFix.get() && silent.get() && RotationUtil.active;
 	}
 
 	@Override

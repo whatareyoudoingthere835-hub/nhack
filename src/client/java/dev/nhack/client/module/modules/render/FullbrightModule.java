@@ -5,13 +5,12 @@ import dev.nhack.client.module.Module;
 import dev.nhack.client.setting.NumberSetting;
 
 /**
- * Brightness is applied from {@code LightTextureMixin}.
- * The slider is kept as a setting example — hook it in the mixin if you want variable intensity.
+ * Brightness is applied to the 1.21.11 GPU lightmap from {@code LightTextureMixin}.
  */
 public final class FullbrightModule extends Module {
 	public final NumberSetting intensity = addSetting(new NumberSetting(
 		"Intensity",
-		"Reserved for a custom brightness curve in LightTextureMixin",
+		"Интенсивность GPU-lightmap, 1.0 = полный свет",
 		1.0,
 		0.1,
 		1.0,

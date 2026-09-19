@@ -1,12 +1,14 @@
 package dev.nhack.client.mixin;
 
 import dev.nhack.client.module.ModuleManager;
+import dev.nhack.client.module.modules.combat.KillAuraModule;
 import dev.nhack.client.module.modules.movement.NoSlowModule;
 import dev.nhack.client.util.CombatUtil;
 import dev.nhack.client.util.RotationUtil;
 import dev.nhack.client.util.TickManager;
 import net.minecraft.client.player.ClientInput;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Input;
 import net.minecraft.world.phys.Vec2;
 import org.spongepowered.asm.mixin.Mixin;
@@ -17,6 +19,51 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(LocalPlayer.class)
 public class LocalPlayerMixin {
+	/** Original input kept while vanilla converts WASD into world movement. */
+	private Vec2 nhack$moveFixOriginal;
+
+	/**
+	 * When KillAura is silent, rotate WASD by server-yaw minus camera-yaw. Vanilla still moves
+	 * relative to the visible camera, but the resulting world vector points where the aura aims.
+	 */
+	@Inject(method = "applyInput", at = @At("HEAD"))
+	private void nhack$applyMoveFix(CallbackInfo ci) {
+		nhack$moveFixOriginal = null;
+		LocalPlayer player = (LocalPlayer) (Object) this;
+		if (!ModuleManager.get(KillAuraModule.class).map(KillAuraModule::shouldMoveFix).orElse(false)
+			|| player.input == null) {
+			return;
+		}
+
+		ClientInputAccessor input = (ClientInputAccessor) player.input;
+		Vec2 original = input.nhack$getMoveVector();
+		if (original == null || original.lengthSquared() == 0.0F) {
+			return;
+		}
+
+		float delta = Mth.wrapDegrees(RotationUtil.yaw - player.getYRot()) * Mth.DEG_TO_RAD;
+		float sin = Mth.sin(delta);
+		float cos = Mth.cos(delta);
+		Vec2 corrected = new Vec2(
+			original.x * cos - original.y * sin,
+			original.y * cos + original.x * sin
+		);
+		nhack$moveFixOriginal = original;
+		input.nhack$setMoveVector(corrected);
+	}
+
+	@Inject(method = "applyInput", at = @At("TAIL"))
+	private void nhack$restoreMoveFix(CallbackInfo ci) {
+		if (nhack$moveFixOriginal == null) {
+			return;
+		}
+		LocalPlayer player = (LocalPlayer) (Object) this;
+		if (player.input != null) {
+			((ClientInputAccessor) player.input).nhack$setMoveVector(nhack$moveFixOriginal);
+		}
+		nhack$moveFixOriginal = null;
+	}
+
 	/**
 	 * Сброс спринта руками античит ловит: пакет должен уйти из ванильного места. Первая строка
 	 * {@code sendPosition} — это {@code sendIsSprintingIfNeeded()}, поэтому снимаем флаг на HEAD
