@@ -46,6 +46,7 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 ```
 .help
 .toggle KillAura
+.toggle PvpTheme
 .bind Fullbright G
 .friend add Steve
 .prefix ,
@@ -117,6 +118,13 @@ IntelliJ: `./gradlew idea` или просто Open как Gradle-проект, 
 **ESP** (Render): 2D-боксы, HP, TNT, перлы, burrow, маяки, lingering clouds.
 
 **Fullbright** (Render): полный свет через GPU-lightmap 1.21.11; `Intensity=1.0` даёт максимальную яркость.
+
+**PvpTheme** (Client): темы из `assets/nhack/sounds` — `high_hp_pvp` запускается после первого удара,
+`low_hp_pvp` заменяет его при HP ≤ 50% (10 HP / 5 сердец), `if_see_team` срабатывает при более чем одном
+видимом игроке с командным тегом, `died_pvp` — при смерти в активном PvP, `killstreak` — на каждом пятом
+убийстве игрока, `team_pvp` — при появлении тимейта с тем же тегом не чаще раза в 10 минут, `win_all_pvp` —
+при переходе таба к одному игроку, тебе. Все семь триггеров можно выключать отдельно; громкость берётся из
+категории Minecraft Music.
 
 **CaveXRay** (Render, класс `ExposedDiamonds`): 2D-подсветка **открытой** алмазной руды — `diamond_ore` и
 `deepslate_diamond_ore`. «Открытая» значит рядом настоящая полость: воздушный сосед засчитывается, только если сам

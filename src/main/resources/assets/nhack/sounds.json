@@ -1,0 +1,37 @@
+{
+  "high_hp_pvp": {
+    "sounds": [
+      {"name": "nhack:high_hp_pvp", "stream": true}
+    ]
+  },
+  "low_hp_pvp": {
+    "sounds": [
+      {"name": "nhack:low_hp_pvp", "stream": true}
+    ]
+  },
+  "if_see_team": {
+    "sounds": [
+      {"name": "nhack:if_see_team", "stream": true}
+    ]
+  },
+  "died_pvp": {
+    "sounds": [
+      {"name": "nhack:died_pvp", "stream": true}
+    ]
+  },
+  "killstreak": {
+    "sounds": [
+      {"name": "nhack:killstreak", "stream": true}
+    ]
+  },
+  "team_pvp": {
+    "sounds": [
+      {"name": "nhack:team_pvp", "stream": true}
+    ]
+  },
+  "win_all_pvp": {
+    "sounds": [
+      {"name": "nhack:win_all_pvp", "stream": true}
+    ]
+  }
+}

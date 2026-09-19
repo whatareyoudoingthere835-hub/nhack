@@ -7,6 +7,7 @@ import dev.nhack.client.event.events.TickEvent;
 import dev.nhack.client.module.modules.client.ClickGuiModule;
 import dev.nhack.client.module.modules.client.HudModule;
 import dev.nhack.client.module.modules.client.RgbModule;
+import dev.nhack.client.module.modules.client.PvpThemeModule;
 import dev.nhack.client.module.modules.combat.AuraModule;
 import dev.nhack.client.module.modules.combat.KillAuraModule;
 import dev.nhack.client.module.modules.misc.ExampleModule;
@@ -38,6 +39,7 @@ public final class ModuleManager {
 		register(new ClickGuiModule());
 		register(new HudModule());
 		register(new RgbModule());
+		register(new PvpThemeModule());
 		register(new AuraModule());
 		register(new KillAuraModule());
 		register(new SprintModule());
